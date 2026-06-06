@@ -103,7 +103,7 @@ function Render-ProgressRow {
         'wait-dl' { $label = "Oczekuje" }
         'wait-in' { $label = "Oczekuje" }
         'dl' {
-            $label  = "Pobieranie"
+            $label  = if ($St.DlBytes -gt 0) { "Pobieranie" } else { "Laczenie" }
             $filled = [Math]::Min($bw, [int]($St.Pct * $bw / 100))
             $bar    = "[" + ("=" * $filled) + (" " * ($bw - $filled)) + "]"
             $dlStr  = Format-DownloadSize $St.DlBytes
@@ -204,6 +204,10 @@ function Invoke-Dependencies {
             $py = Join-Path $dest "python.exe"
             if (-not (Test-Path $py)) { return $false }
 
+            # PYTHONHOME/PYTHONPATH od systemowego Pythona psuja ladowanie modulow
+            # embeddable Pythona — musimy je wyczyścic przed kazdym wywolaniem.
+            $env:PYTHONHOME = $null
+            $env:PYTHONPATH = $null
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
             $getpip = Join-Path $env:TEMP "tm-get-pip.py"
             (New-Object System.Net.WebClient).DownloadFile("https://bootstrap.pypa.io/get-pip.py", $getpip)
@@ -290,14 +294,20 @@ function Invoke-Dependencies {
     }
 
     $sbWhisper = {
-        param($pyExe)
+        param($pyExe, $pipLog)
         try {
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            $env:PYTHONIOENCODING = 'utf-8'
-            & $pyExe -m pip install --upgrade openai-whisper --no-warn-script-location 2>&1 | Out-Null
+            $env:PYTHONHOME        = $null
+            $env:PYTHONPATH        = $null
+            $env:PYTHONUNBUFFERED  = '1'
+            $env:PYTHONIOENCODING  = 'utf-8'
+            & $pyExe -m pip install --upgrade openai-whisper --no-warn-script-location > $pipLog 2>&1
             $scriptsDir = Join-Path (Split-Path $pyExe -Parent) "Scripts"
             return (Test-Path (Join-Path $scriptsDir "whisper.exe"))
-        } catch { return $false }
+        } catch {
+            Add-Content -Path $pipLog -Value "EXCEPTION: $_" -Encoding UTF8 -ErrorAction SilentlyContinue
+            return $false
+        }
     }
 
     # Tabela postepu
@@ -366,15 +376,33 @@ function Invoke-Dependencies {
 
     if ($dlJobs.Count -gt 0) {
         $dlStart = Get-Date
+        $dlDone  = @{}
         while ($dlJobs.Values | Where-Object { $_.Job.State -eq 'Running' }) {
             $elapsed    = [int]((Get-Date) - $dlStart).TotalSeconds
             $elapsedStr = "{0}:{1:D2}" -f [int]($elapsed / 60), ($elapsed % 60)
             foreach ($nm in $dlJobs.Keys) {
-                if ($dlJobs[$nm].Job.State -ne 'Running') { continue }
-                $dl  = if (Test-Path $dlJobs[$nm].Dest) { (Get-Item $dlJobs[$nm].Dest).Length } else { 0L }
-                $tot = $st[$nm].TotalBytes
-                $st[$nm].DlBytes = $dl
-                $st[$nm].Pct     = if ($tot -gt 0) { [int]($dl * 100 / $tot) } else { 0 }
+                if ($dlDone[$nm]) { continue }
+                $djob = $dlJobs[$nm].Job
+                if ($djob.State -eq 'Running') {
+                    $dl  = if (Test-Path $dlJobs[$nm].Dest) { (Get-Item $dlJobs[$nm].Dest).Length } else { 0L }
+                    $tot = $st[$nm].TotalBytes
+                    $st[$nm].DlBytes = $dl
+                    $st[$nm].Pct     = if ($tot -gt 0) { [int]($dl * 100 / $tot) } else { 0 }
+                } else {
+                    # Zakończony przed tym tickiem — finalizuj od razu
+                    $null = Receive-Job -Job $djob -ErrorAction SilentlyContinue
+                    if ($djob.State -eq 'Failed') {
+                        $st[$nm].Phase = 'err'
+                    } else {
+                        $dl = if (Test-Path $dlJobs[$nm].Dest) { (Get-Item $dlJobs[$nm].Dest).Length } else { $st[$nm].TotalBytes }
+                        $st[$nm].DlBytes  = $dl
+                        if ($st[$nm].TotalBytes -eq 0L) { $st[$nm].TotalBytes = $dl }
+                        $st[$nm].Pct   = 100
+                        $st[$nm].Phase = 'wait-in'
+                    }
+                    Remove-Job -Job $djob -Force
+                    $dlDone[$nm] = $true
+                }
                 [Console]::SetCursorPosition(0, $tableRow + $rowOf[$nm])
                 Render-ProgressRow $nm $st[$nm] $w
             }
@@ -384,6 +412,7 @@ function Invoke-Dependencies {
         }
 
         foreach ($nm in $dlJobs.Keys) {
+            if ($dlDone[$nm]) { continue }
             $dj = $dlJobs[$nm]
             $null = Receive-Job -Job $dj.Job -ErrorAction SilentlyContinue
             if ($dj.Job.State -eq 'Failed') {
@@ -405,13 +434,13 @@ function Invoke-Dependencies {
     }
     [Console]::SetCursorPosition(0, $afterRow)
 
-    # Faza 3: instalacja — Start-Job na kazdy dep, zeby nie brudzic konsoli
+    # Faza 3: instalacja
     $whisperTask = $null
 
+    # 3a: reuse + system (sekwencyjnie — system moze wymagac interakcji z wingetem)
     foreach ($t in $tasks) {
         $dep  = $t.Dep
         $name = $dep.Name
-
         switch ($t.Mode) {
             'reuse' {
                 $manifest[$dep.Command] = $dep.ManifestEntry('system', $RuntimeDir, $InstallDir)
@@ -432,48 +461,64 @@ function Invoke-Dependencies {
                 if ($ok) { $manifest[$dep.Command] = $dep.ManifestEntry('system', $RuntimeDir, $InstallDir) }
             }
             'portable' {
-                if ($name -eq 'whisper') { $whisperTask = $t; continue }
-                if ($st[$name].Phase -eq 'err') { continue }
-
-                if (-not (Test-Path $RuntimeDir)) { New-Item -ItemType Directory -Path $RuntimeDir -Force | Out-Null }
-
-                $sb        = $null
-                $sbArgList = @()
-                if ($name -eq 'Python')   { $sb = $sbPython;   $sbArgList = @($t.ZipDest, $RuntimeDir) }
-                if ($name -eq 'ffmpeg')   { $sb = $sbFfmpeg;   $sbArgList = @($t.ZipDest, $RuntimeDir) }
-                if ($name -eq 'mkvmerge') { $sb = $sbMkvmerge; $sbArgList = @($t.ZipDest, $RuntimeDir) }
-                if (-not $sb) { continue }
-
-                $st[$name].Phase     = 'inst'
-                $st[$name].StartedAt = Get-Date
-                [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
-                Render-ProgressRow $name $st[$name] $w
-                [Console]::SetCursorPosition(0, $afterRow)
-
-                $instJob = Start-Job -ScriptBlock $sb -ArgumentList $sbArgList
-                while ($instJob.State -eq 'Running') {
-                    [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
-                    Render-ProgressRow $name $st[$name] $w
-                    [Console]::SetCursorPosition(0, $afterRow)
-                    Start-Sleep -Milliseconds 400
-                }
-
-                $result = Receive-Job -Job $instJob -ErrorAction SilentlyContinue
-                $ok     = ($instJob.State -ne 'Failed') -and ($result -eq $true)
-                Remove-Job -Job $instJob -Force
-
-                $st[$name].Phase = if ($ok) { 'ok' } else { 'err' }
-                [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
-                Render-ProgressRow $name $st[$name] $w
-                [Console]::SetCursorPosition(0, $afterRow)
-
-                if ($ok) {
-                    $manifest[$dep.Command] = $dep.ManifestEntry('portable', $RuntimeDir, $InstallDir)
-                    $needRuntime = $true
-                }
+                if ($name -eq 'whisper') { $whisperTask = $t }
             }
         }
     }
+
+    # 3b: portable Python/ffmpeg/mkvmerge — rownolegle Start-Joby
+    $portableJobs = @{}
+    foreach ($t in $tasks) {
+        $dep  = $t.Dep
+        $name = $dep.Name
+        if ($t.Mode -ne 'portable' -or $name -eq 'whisper') { continue }
+        if ($st[$name].Phase -eq 'err') { continue }
+
+        if (-not (Test-Path $RuntimeDir)) { New-Item -ItemType Directory -Path $RuntimeDir -Force | Out-Null }
+
+        $sb        = $null
+        $sbArgList = @()
+        if ($name -eq 'Python')   { $sb = $sbPython;   $sbArgList = @($t.ZipDest, $RuntimeDir) }
+        if ($name -eq 'ffmpeg')   { $sb = $sbFfmpeg;   $sbArgList = @($t.ZipDest, $RuntimeDir) }
+        if ($name -eq 'mkvmerge') { $sb = $sbMkvmerge; $sbArgList = @($t.ZipDest, $RuntimeDir) }
+        if (-not $sb) { continue }
+
+        $st[$name].Phase     = 'inst'
+        $st[$name].StartedAt = Get-Date
+        [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
+        Render-ProgressRow $name $st[$name] $w
+
+        $portableJobs[$name] = @{ Job = Start-Job -ScriptBlock $sb -ArgumentList $sbArgList; Dep = $dep }
+    }
+    [Console]::SetCursorPosition(0, $afterRow)
+
+    while ($portableJobs.Values | Where-Object { $_.Job.State -eq 'Running' }) {
+        foreach ($nm in $portableJobs.Keys) {
+            if ($portableJobs[$nm].Job.State -ne 'Running') { continue }
+            [Console]::SetCursorPosition(0, $tableRow + $rowOf[$nm])
+            Render-ProgressRow $nm $st[$nm] $w
+        }
+        [Console]::SetCursorPosition(0, $afterRow)
+        Start-Sleep -Milliseconds 400
+    }
+
+    foreach ($nm in $portableJobs.Keys) {
+        $ij  = $portableJobs[$nm].Job
+        $dep = $portableJobs[$nm].Dep
+        $result = Receive-Job -Job $ij -ErrorAction SilentlyContinue
+        $ok     = ($ij.State -ne 'Failed') -and ($result -eq $true)
+        Remove-Job -Job $ij -Force
+
+        $st[$nm].Phase = if ($ok) { 'ok' } else { 'err' }
+        [Console]::SetCursorPosition(0, $tableRow + $rowOf[$nm])
+        Render-ProgressRow $nm $st[$nm] $w
+
+        if ($ok) {
+            $manifest[$dep.Command] = $dep.ManifestEntry('portable', $RuntimeDir, $InstallDir)
+            $needRuntime = $true
+        }
+    }
+    [Console]::SetCursorPosition(0, $afterRow)
 
     # Whisper (pip, wolny) — musi byc po instalacji Pythona
     if ($whisperTask) {
@@ -491,7 +536,8 @@ function Invoke-Dependencies {
             Render-ProgressRow $name $st[$name] $w
             [Console]::SetCursorPosition(0, $afterRow)
 
-            $pipJob = Start-Job -ScriptBlock $sbWhisper -ArgumentList $pyExe
+            $pipLog = Join-Path $env:TEMP "tm-pip-whisper.log"
+            $pipJob = Start-Job -ScriptBlock $sbWhisper -ArgumentList $pyExe, $pipLog
             while ($pipJob.State -eq 'Running') {
                 [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
                 Render-ProgressRow $name $st[$name] $w
@@ -507,6 +553,10 @@ function Invoke-Dependencies {
         [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
         Render-ProgressRow $name $st[$name] $w
         [Console]::SetCursorPosition(0, $afterRow)
+
+        if ($st[$name].Phase -eq 'err' -and (Test-Path $pipLog)) {
+            Write-Host "    Log pip: $pipLog" -ForegroundColor DarkGray
+        }
 
         if ($st[$name].Phase -eq 'ok') {
             $manifest[$dep.Command] = $dep.ManifestEntry('portable', $RuntimeDir, $InstallDir)
