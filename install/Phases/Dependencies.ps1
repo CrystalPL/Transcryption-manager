@@ -1,12 +1,13 @@
 ﻿function Write-DepsRow {
     param([hashtable]$Row, [bool]$IsSelected, [int]$Width, [hashtable]$Labels)
-    $marker  = if ($IsSelected) { "> " } else { "  " }
-    $name    = $Row.Dep.Name.PadRight(12)
-    $state   = (if ($Row.Detected) { "wykryto" } else { "brak" }).PadRight(10)
-    $mode    = $Labels[$Row.Modes[$Row.Idx]]
-    $modeStr = "[ <- $($mode.PadRight(16)) -> ]"
-    $line    = "  $marker $name  $state  $modeStr"
-    $color   = if ($IsSelected) { 'Cyan' } else { 'White' }
+    $marker   = if ($IsSelected) { "> " } else { "  " }
+    $name     = $Row.Dep.Name.PadRight(12)
+    $stateStr = if ($Row.Detected) { "wykryto" } else { "brak" }
+    $state    = $stateStr.PadRight(10)
+    $mode     = $Labels[$Row.Modes[$Row.Idx]]
+    $modeStr  = "[ <- $($mode.PadRight(16)) -> ]"
+    $line     = "  $marker $name  $state  $modeStr"
+    $color    = if ($IsSelected) { 'Cyan' } else { 'White' }
     Write-Host $line.PadRight($Width - 1) -ForegroundColor $color -NoNewline
     Write-Host ""
 }
