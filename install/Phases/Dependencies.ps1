@@ -1,4 +1,85 @@
-﻿function Format-DownloadSize([long]$bytes) {
+﻿function Write-DepsRow {
+    param([hashtable]$Row, [bool]$IsSelected, [int]$Width, [hashtable]$Labels)
+    $marker  = if ($IsSelected) { "> " } else { "  " }
+    $name    = $Row.Dep.Name.PadRight(12)
+    $state   = (if ($Row.Detected) { "wykryto" } else { "brak" }).PadRight(10)
+    $mode    = $Labels[$Row.Modes[$Row.Idx]]
+    $modeStr = "[ <- $($mode.PadRight(16)) -> ]"
+    $line    = "  $marker $name  $state  $modeStr"
+    $color   = if ($IsSelected) { 'Cyan' } else { 'White' }
+    Write-Host $line.PadRight($Width - 1) -ForegroundColor $color -NoNewline
+    Write-Host ""
+}
+
+function Show-DepsConfig {
+    param([object[]]$Deps)
+
+    $labels = @{ reuse = 'Zachowaj'; system = 'Systemowo'; portable = 'Portable' }
+
+    $rows = @()
+    foreach ($dep in $Deps) {
+        $detected = $dep.Test()
+        $modes = if ($dep.SupportsPortable) {
+            if ($detected) { @('reuse', 'system', 'portable') } else { @('system', 'portable') }
+        } else {
+            if ($detected) { @('reuse', 'system') } else { @('system') }
+        }
+        $rows += @{ Dep = $dep; Detected = $detected; Modes = $modes; Idx = 0 }
+    }
+
+    $sel = 0
+    $w   = [Console]::WindowWidth
+    $sep = "  " + ("-" * ([Math]::Min($w - 4, 58)))
+
+    Write-Host ""
+    Write-Host "  Konfiguracja zaleznosci:" -ForegroundColor Cyan
+    Write-Host "  (strzalki góra/dól: wybierz   lewo/prawo: zmien tryb   Enter: zatwierdz)" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host ("  {0,-14}  {1,-10}  {2}" -f "Komponent", "Status", "Tryb instalacji") -ForegroundColor DarkGray
+    Write-Host $sep -ForegroundColor DarkGray
+
+    $dataRow = [Console]::CursorTop
+    for ($i = 0; $i -lt $rows.Count; $i++) { Write-Host "" }
+    Write-Host $sep -ForegroundColor DarkGray
+
+    for ($i = 0; $i -lt $rows.Count; $i++) {
+        [Console]::SetCursorPosition(0, $dataRow + $i)
+        Write-DepsRow $rows[$i] ($i -eq $sel) $w $labels
+    }
+    [Console]::SetCursorPosition(0, $dataRow + $rows.Count + 1)
+
+    while ($true) {
+        $k = [Console]::ReadKey($true)
+        if ($k.Key -eq 'Enter') { break }
+
+        $prevSel = $sel
+        if ($k.Key -eq 'UpArrow')    { $sel = [Math]::Max(0, $sel - 1) }
+        if ($k.Key -eq 'DownArrow')  { $sel = [Math]::Min($rows.Count - 1, $sel + 1) }
+        if ($k.Key -eq 'LeftArrow') {
+            $rows[$sel].Idx = ($rows[$sel].Idx - 1 + $rows[$sel].Modes.Count) % $rows[$sel].Modes.Count
+        }
+        if ($k.Key -eq 'RightArrow') {
+            $rows[$sel].Idx = ($rows[$sel].Idx + 1) % $rows[$sel].Modes.Count
+        }
+
+        if ($prevSel -ne $sel) {
+            [Console]::SetCursorPosition(0, $dataRow + $prevSel)
+            Write-DepsRow $rows[$prevSel] $false $w $labels
+        }
+        [Console]::SetCursorPosition(0, $dataRow + $sel)
+        Write-DepsRow $rows[$sel] $true $w $labels
+        [Console]::SetCursorPosition(0, $dataRow + $rows.Count + 1)
+    }
+
+    Write-Host ""
+    $result = [System.Collections.ArrayList]::new()
+    foreach ($r in $rows) {
+        [void]$result.Add(@{ Dep = $r.Dep; Mode = $r.Modes[$r.Idx]; ZipDest = $null })
+    }
+    return $result
+}
+
+function Format-DownloadSize([long]$bytes) {
     if ($bytes -ge 1MB) { return "{0:F1} MB" -f ($bytes / 1MB) }
     if ($bytes -ge 1KB) { return "{0:F0} KB" -f ($bytes / 1KB) }
     return "$bytes B"
@@ -108,28 +189,8 @@ function Invoke-Dependencies {
     $manifest    = @{}
     $needRuntime = $false
 
-    # --- Faza 1: zbierz wybory dla wszystkich komponentow ---
-    $tasks = [System.Collections.ArrayList]::new()
-    foreach ($dep in $deps) {
-        $name = $dep.Name
-        if ($dep.Test()) {
-            Write-Host "`n  $name — wykryto w systemie" -ForegroundColor DarkGray
-            if (Ask-YN "Uzyc istniejącej instalacji systemowej $name?" $true) {
-                [void]$tasks.Add(@{ Dep = $dep; Mode = 'reuse'; ZipDest = $null })
-                continue
-            }
-        }
-        if ($dep.SupportsPortable) {
-            $choice = Ask-Choice "Jak zainstalowac $name?" @(
-                "Systemowo (winget / pip)",
-                "Portable (do folderu instalacji)"
-            ) 0
-            $choiceMode = if ($choice -eq 0) { 'system' } else { 'portable' }
-            [void]$tasks.Add(@{ Dep = $dep; Mode = $choiceMode; ZipDest = $null })
-        } else {
-            [void]$tasks.Add(@{ Dep = $dep; Mode = 'system'; ZipDest = $null })
-        }
-    }
+    # --- Faza 1: zbierz wybory przez interaktywna tabelke ---
+    $tasks = Show-DepsConfig $deps
 
     # --- Faza 2: rozwiaz URL-e i pobierz wszystko rownoleglie ---
     $downloadTasks = [System.Collections.ArrayList]::new()
