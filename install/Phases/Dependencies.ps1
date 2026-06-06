@@ -34,7 +34,7 @@ function Show-DepsConfig {
 
     Write-Host ""
     Write-Host "  Konfiguracja zaleznosci:" -ForegroundColor Cyan
-    Write-Host "  (strzalki góra/dól: wybierz   lewo/prawo: zmien tryb   Enter: zatwierdz)" -ForegroundColor DarkGray
+    Write-Host "  (strzalki gora/dol: wybierz   lewo/prawo: zmien tryb   Enter: zatwierdz)" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host ("  {0,-14}  {1,-10}  {2}" -f "Komponent", "Status", "Tryb instalacji") -ForegroundColor DarkGray
     Write-Host $sep -ForegroundColor DarkGray
@@ -86,86 +86,60 @@ function Format-DownloadSize([long]$bytes) {
     return "$bytes B"
 }
 
-function Invoke-ParallelDownloads {
-    param([array]$Tasks)  # @{Label; Url; Dest}
+function Render-ProgressRow {
+    param([string]$Name, [hashtable]$St, [int]$W)
+    $bw    = 20
+    $label = ""
+    $bar   = "[" + (" " * $bw) + "]"
+    $info  = ""
+    $color = 'DarkGray'
 
-    if ($Tasks.Count -eq 0) { return }
-
-    # HEAD requests zeby poznac rozmiary plikow przed pobieraniem
-    $totals = @{}
-    foreach ($t in $Tasks) {
-        try {
-            $req = [System.Net.WebRequest]::Create($t.Url)
-            $req.Method  = 'HEAD'
-            $req.Timeout = 8000
-            $resp = $req.GetResponse()
-            $totals[$t.Label] = $resp.ContentLength
-            $resp.Close()
-        } catch {
-            $totals[$t.Label] = 0L
+    switch ($St.Phase) {
+        'skip' {
+            $label = "Zachowany"
+            $bar   = "[" + ("=" * $bw) + "]"
+            $color = 'DarkGreen'
+        }
+        'wait-dl' { $label = "Oczekuje" }
+        'wait-in' { $label = "Oczekuje" }
+        'dl' {
+            $label  = "Pobieranie"
+            $filled = [Math]::Min($bw, [int]($St.Pct * $bw / 100))
+            $bar    = "[" + ("=" * $filled) + (" " * ($bw - $filled)) + "]"
+            $dlStr  = Format-DownloadSize $St.DlBytes
+            $totStr = if ($St.TotalBytes -gt 0) { Format-DownloadSize $St.TotalBytes } else { "??" }
+            $info   = " $("{0,3}" -f $St.Pct)%  $("{0,8}" -f $dlStr) / $totStr"
+            $color  = 'White'
+        }
+        'inst' {
+            $label   = "Instalowanie"
+            $elapsed = if ($St.StartedAt) { [int]((Get-Date) - $St.StartedAt).TotalSeconds } else { 0 }
+            $info    = " $($elapsed)s"
+            $color   = 'Yellow'
+        }
+        'pip' {
+            $label   = "pip install"
+            $elapsed = if ($St.StartedAt) { [int]((Get-Date) - $St.StartedAt).TotalSeconds } else { 0 }
+            $info    = if ($St.StartedAt) { " $($elapsed)s" } else { " ~10-20 min" }
+            $color   = 'Yellow'
+        }
+        'ok' {
+            $label  = "Gotowe"
+            $bar    = "[" + ("=" * $bw) + "]"
+            $sz     = if ($St.TotalBytes -gt 0) { Format-DownloadSize $St.TotalBytes } else { "" }
+            $info   = if ($sz) { " $sz" } else { "" }
+            $color  = 'Green'
+        }
+        'err' {
+            $label = "Blad!"
+            $bar   = "[" + ("!" * $bw) + "]"
+            $color = 'Red'
         }
     }
 
-    # Start-Job na kazdy plik — osobny PS runspace, bez problemu z wątkami
-    $jobInfos = @()
-    foreach ($t in $Tasks) {
-        $job = Start-Job -ScriptBlock {
-            param($url, $dest)
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            (New-Object System.Net.WebClient).DownloadFile($url, $dest)
-        } -ArgumentList $t.Url, $t.Dest
-        $jobInfos += @{ Label = $t.Label; Job = $job; Dest = $t.Dest }
-    }
-
-    $startTime = Get-Date
-    $w         = [Console]::WindowWidth
-    $startRow  = [Console]::CursorTop
-    for ($i = 0; $i -le $Tasks.Count; $i++) { Write-Host "" }
-
-    while ($jobInfos | Where-Object { $_.Job.State -eq 'Running' }) {
-        $elapsed    = [int]((Get-Date) - $startTime).TotalSeconds
-        $elapsedStr = "{0}:{1:D2}" -f [int]($elapsed / 60), ($elapsed % 60)
-
-        [Console]::SetCursorPosition(0, $startRow)
-        foreach ($info in $jobInfos) {
-            $dl     = if (Test-Path $info.Dest) { (Get-Item $info.Dest).Length } else { 0L }
-            $tot    = $totals[$info.Label]
-            $pct    = if ($tot -gt 0) { [int]($dl * 100 / $tot) } else { 0 }
-            $filled = [Math]::Min(20, [int]($pct / 5))
-            $bar    = "[" + ("=" * $filled) + (" " * (20 - $filled)) + "]"
-            $dlStr  = Format-DownloadSize $dl
-            $totStr = if ($tot -gt 0) { Format-DownloadSize $tot } else { "??" }
-            $color  = if ($info.Job.State -ne 'Running') { 'Green' } else { 'White' }
-            $line   = "  {0,-12} {1} {2,3}%  {3,8} / {4}" -f $info.Label, $bar, $pct, $dlStr, $totStr
-            Write-Host $line.PadRight($w - 1) -ForegroundColor $color
-        }
-        Write-Host ("  Czas: $elapsedStr").PadRight($w - 1) -ForegroundColor DarkGray
-
-        Start-Sleep -Milliseconds 300
-    }
-
-    # Finalny render
-    $elapsed    = [int]((Get-Date) - $startTime).TotalSeconds
-    $elapsedStr = "{0}:{1:D2}" -f [int]($elapsed / 60), ($elapsed % 60)
-    [Console]::SetCursorPosition(0, $startRow)
-    foreach ($info in $jobInfos) {
-        $tot    = $totals[$info.Label]
-        $dl     = if (Test-Path $info.Dest) { (Get-Item $info.Dest).Length } else { $tot }
-        $totStr = Format-DownloadSize ([Math]::Max($tot, $dl))
-        $line   = "  {0,-12} [====================] 100%  {1,8}" -f $info.Label, $totStr
-        Write-Host $line.PadRight($w - 1) -ForegroundColor Green
-    }
-    Write-Host ("  Czas: $elapsedStr").PadRight($w - 1) -ForegroundColor DarkGray
-
-    # Sprawdz bledy i posprzataj
-    foreach ($info in $jobInfos) {
-        $null = Receive-Job -Job $info.Job -ErrorAction SilentlyContinue
-        if ($info.Job.State -eq 'Failed') {
-            $err = $info.Job.ChildJobs[0].JobStateInfo.Reason.Message
-            Write-Host "  [FAIL] $($info.Label): $err" -ForegroundColor Red
-        }
-        Remove-Job -Job $info.Job -Force
-    }
+    $line = "  {0,-10} {1,-12} {2}{3}" -f $Name, $label, $bar, $info
+    Write-Host $line.PadRight($W - 1) -ForegroundColor $color -NoNewline
+    Write-Host ""
 }
 
 function Invoke-Dependencies {
@@ -174,7 +148,6 @@ function Invoke-Dependencies {
         [string]$InstallDir
     )
 
-    # Kolejnosc wymuszona: Python przed Whisperem (whisper portable potrzebuje pip z portable Pythona)
     $deps = @(
         [PythonDependency]::new(),
         [FfmpegDependency]::new(),
@@ -193,7 +166,7 @@ function Invoke-Dependencies {
             Write-OK "GPU NVIDIA: $gpuName"
         } catch { Write-OK "GPU NVIDIA wykryta" }
     } else {
-        Write-Skip "Brak GPU NVIDIA — Whisper bedzie dzialal na CPU (znacznie wolniej)"
+        Write-Skip "Brak GPU NVIDIA (CUDA) — Whisper bedzie dzialal na CPU (znacznie wolniej)"
     }
 
     if ($NoDeps) {
@@ -201,33 +174,240 @@ function Invoke-Dependencies {
         return
     }
 
-    Write-Step "[4/5] Konfiguracja zaleznosci..."
-
+    Write-Step "[4/5] Instalowanie zaleznosci..."
     $RuntimeDir  = Join-Path $InstallDir "runtime"
     $manifest    = @{}
     $needRuntime = $false
 
-    # --- Faza 1: zbierz wybory przez interaktywna tabelke ---
+    # Faza 1: interaktywny wybor trybow
     $tasks = Show-DepsConfig $deps
 
-    # --- Faza 2: rozwiaz URL-e i pobierz wszystko rownoleglie ---
-    $downloadTasks = [System.Collections.ArrayList]::new()
+    # Scriptblocki instalacji — tylko prymitywne argumenty, bezpieczne dla Start-Job
+    $sbPython = {
+        param($zipPath, $runtimeDir)
+        try {
+            $dest = Join-Path $runtimeDir "python"
+            if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+            New-Item -ItemType Directory -Path $dest -Force | Out-Null
+            Expand-Archive -Path $zipPath -DestinationPath $dest -Force
+            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+
+            $pth = Get-ChildItem $dest -Filter "python3*._pth" | Select-Object -First 1
+            if ($pth) {
+                $lines = [System.IO.File]::ReadAllLines($pth.FullName)
+                $out = foreach ($l in $lines) {
+                    if ($l.Trim() -eq '#import site') { 'import site' } else { $l }
+                }
+                [System.IO.File]::WriteAllLines($pth.FullName, $out)
+            }
+
+            $py = Join-Path $dest "python.exe"
+            if (-not (Test-Path $py)) { return $false }
+
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            $getpip = Join-Path $env:TEMP "tm-get-pip.py"
+            (New-Object System.Net.WebClient).DownloadFile("https://bootstrap.pypa.io/get-pip.py", $getpip)
+            & $py $getpip --no-warn-script-location 2>&1 | Out-Null
+            Remove-Item $getpip -Force -ErrorAction SilentlyContinue
+
+            return ((Test-Path (Join-Path $dest "Scripts\pip.exe")) -or
+                    (Test-Path (Join-Path $dest "Lib\site-packages\pip")))
+        } catch { return $false }
+    }
+
+    $sbFfmpeg = {
+        param($zipPath, $runtimeDir)
+        try {
+            $dest    = Join-Path $runtimeDir "ffmpeg"
+            $tmp     = Join-Path $env:TEMP "tm-ffmpeg-x"
+            if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+            Expand-Archive -Path $zipPath -DestinationPath $tmp -Force
+            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+            $binSrc  = Get-ChildItem $tmp -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+            if (-not $binSrc) { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue; return $false }
+            $destBin = Join-Path $dest "bin"
+            if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+            New-Item -ItemType Directory -Path $destBin -Force | Out-Null
+            Copy-Item (Join-Path (Split-Path $binSrc.FullName -Parent) "*.exe") -Destination $destBin -Force
+            Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+            return (Test-Path (Join-Path $destBin "ffmpeg.exe"))
+        } catch { return $false }
+    }
+
+    $sbMkvmerge = {
+        param($zipPath, $runtimeDir)
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+            # Jesli zip nie zostal pobrany wczesniej — pobierz teraz
+            if (-not $zipPath -or -not (Test-Path $zipPath)) {
+                $ver = $null
+                try {
+                    $resp = Invoke-RestMethod -Uri "https://gitlab.com/api/v4/projects/mbunkus%2Fmkvtoolnix/releases?per_page=1" -UseBasicParsing
+                    $tag  = if ($resp -and $resp.Count -gt 0) { $resp[0].tag_name } else { $null }
+                    $v    = if ($tag) { $tag -replace '^release-', '' } else { $null }
+                    if ($v -match '^\d') { $ver = $v }
+                } catch {}
+                if (-not $ver) {
+                    try {
+                        $page = Invoke-WebRequest -Uri "https://mkvtoolnix.download/downloads.html" -UseBasicParsing
+                        $m    = [regex]::Match($page.Content, 'mkvtoolnix-64-bit-([\d.]+)\.7z')
+                        if ($m.Success) { $ver = $m.Groups[1].Value }
+                    } catch {}
+                }
+                if (-not $ver) { return $false }
+                $zipPath = Join-Path $env:TEMP "tm-mkvtoolnix.7z"
+                (New-Object System.Net.WebClient).DownloadFile(
+                    "https://mkvtoolnix.download/windows/releases/$ver/mkvtoolnix-64-bit-$ver.7z",
+                    $zipPath)
+            }
+
+            $dest   = Join-Path $runtimeDir "mkvtoolnix"
+            $tmpExt = Join-Path $env:SystemDrive "tm-mkv-x"
+            $7zrExe = Join-Path $env:TEMP "tm-7zr.exe"
+
+            if (-not (Test-Path $7zrExe)) {
+                (New-Object System.Net.WebClient).DownloadFile("https://www.7-zip.org/a/7zr.exe", $7zrExe)
+            }
+            if (Test-Path $tmpExt) { Remove-Item $tmpExt -Recurse -Force }
+            New-Item -ItemType Directory -Path $tmpExt -Force | Out-Null
+
+            & $7zrExe x $zipPath "-o$tmpExt" -y 2>&1 | Out-Null
+            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+            Remove-Item $7zrExe  -Force -ErrorAction SilentlyContinue
+
+            $binSrc = Get-ChildItem $tmpExt -Recurse -Filter "mkvmerge.exe" | Select-Object -First 1
+            if (-not $binSrc) { Remove-Item $tmpExt -Recurse -Force -ErrorAction SilentlyContinue; return $false }
+
+            $binDir = Split-Path $binSrc.FullName -Parent
+            if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+            New-Item -ItemType Directory -Path $dest -Force | Out-Null
+            Copy-Item (Join-Path $binDir "*") -Destination $dest -Recurse -Force
+            Remove-Item $tmpExt -Recurse -Force -ErrorAction SilentlyContinue
+
+            return (Test-Path (Join-Path $dest "mkvmerge.exe"))
+        } catch { return $false }
+    }
+
+    $sbWhisper = {
+        param($pyExe)
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            $env:PYTHONIOENCODING = 'utf-8'
+            & $pyExe -m pip install --upgrade openai-whisper --no-warn-script-location 2>&1 | Out-Null
+            $scriptsDir = Join-Path (Split-Path $pyExe -Parent) "Scripts"
+            return (Test-Path (Join-Path $scriptsDir "whisper.exe"))
+        } catch { return $false }
+    }
+
+    # Tabela postepu
+    $w   = [Console]::WindowWidth
+    $sep = "  " + ("-" * [Math]::Min($w - 4, 62))
+
+    Write-Host ""
+    Write-Host "  Instalowanie skladnikow..." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host ("  {0,-10} {1,-12}  {2}" -f "Komponent", "Status", "Postep") -ForegroundColor DarkGray
+    Write-Host $sep -ForegroundColor DarkGray
+
+    $st       = @{}
+    $rowOf    = @{}
+    $tableRow = [Console]::CursorTop
+    $ri       = 0
+
+    foreach ($t in $tasks) {
+        $initPhase = if ($t.Mode -eq 'reuse') { 'skip' } else { 'wait-dl' }
+        $st[$t.Dep.Name] = @{ Phase = $initPhase; Pct = 0; DlBytes = 0L; TotalBytes = 0L; StartedAt = $null }
+        $rowOf[$t.Dep.Name] = $ri; $ri++
+        Write-Host ""
+    }
+
+    Write-Host $sep -ForegroundColor DarkGray
+    $timerRow = [Console]::CursorTop; Write-Host ""
+    $afterRow = [Console]::CursorTop
+
+    foreach ($t in $tasks) {
+        [Console]::SetCursorPosition(0, $tableRow + $rowOf[$t.Dep.Name])
+        Render-ProgressRow $t.Dep.Name $st[$t.Dep.Name] $w
+    }
+    [Console]::SetCursorPosition(0, $afterRow)
+
+    # Faza 2: rownolegla pobieranie (wszystkie portable z URL jednoczesnie)
+    $dlJobs = @{}
+
     foreach ($t in $tasks) {
         if ($t.Mode -ne 'portable') { continue }
         $url = $t.Dep.GetPortableZipUrl()
         if (-not $url) { continue }
-        $dest       = $t.Dep.GetPortableTempPath()
-        $t.ZipDest  = $dest
-        [void]$downloadTasks.Add(@{ Label = $t.Dep.Name; Url = $url; Dest = $dest })
+        $dest      = $t.Dep.GetPortableTempPath()
+        $t.ZipDest = $dest
+
+        try {
+            $req = [System.Net.WebRequest]::Create($url)
+            $req.Method = 'HEAD'; $req.Timeout = 8000
+            $resp = $req.GetResponse()
+            $st[$t.Dep.Name].TotalBytes = $resp.ContentLength
+            $resp.Close()
+        } catch {}
+
+        $st[$t.Dep.Name].Phase = 'dl'
+        [Console]::SetCursorPosition(0, $tableRow + $rowOf[$t.Dep.Name])
+        Render-ProgressRow $t.Dep.Name $st[$t.Dep.Name] $w
+
+        $captUrl  = $url
+        $captDest = $dest
+        $job = Start-Job -ScriptBlock {
+            param($u, $d)
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            (New-Object System.Net.WebClient).DownloadFile($u, $d)
+        } -ArgumentList $captUrl, $captDest
+        $dlJobs[$t.Dep.Name] = @{ Job = $job; Dest = $dest }
     }
 
-    if ($downloadTasks.Count -gt 0) {
-        Write-Host ""
-        Write-Host "  Pobieranie skladnikow..." -ForegroundColor Cyan
-        Invoke-ParallelDownloads $downloadTasks.ToArray()
-    }
+    if ($dlJobs.Count -gt 0) {
+        $dlStart = Get-Date
+        while ($dlJobs.Values | Where-Object { $_.Job.State -eq 'Running' }) {
+            $elapsed    = [int]((Get-Date) - $dlStart).TotalSeconds
+            $elapsedStr = "{0}:{1:D2}" -f [int]($elapsed / 60), ($elapsed % 60)
+            foreach ($nm in $dlJobs.Keys) {
+                if ($dlJobs[$nm].Job.State -ne 'Running') { continue }
+                $dl  = if (Test-Path $dlJobs[$nm].Dest) { (Get-Item $dlJobs[$nm].Dest).Length } else { 0L }
+                $tot = $st[$nm].TotalBytes
+                $st[$nm].DlBytes = $dl
+                $st[$nm].Pct     = if ($tot -gt 0) { [int]($dl * 100 / $tot) } else { 0 }
+                [Console]::SetCursorPosition(0, $tableRow + $rowOf[$nm])
+                Render-ProgressRow $nm $st[$nm] $w
+            }
+            [Console]::SetCursorPosition(0, $timerRow)
+            Write-Host ("  Czas pobierania: $elapsedStr").PadRight($w - 1) -ForegroundColor DarkGray -NoNewline
+            Start-Sleep -Milliseconds 300
+        }
 
-    # --- Faza 3: instalacja w kolejnosci (Python -> ffmpeg/mkvmerge -> Whisper) ---
+        foreach ($nm in $dlJobs.Keys) {
+            $dj = $dlJobs[$nm]
+            $null = Receive-Job -Job $dj.Job -ErrorAction SilentlyContinue
+            if ($dj.Job.State -eq 'Failed') {
+                $st[$nm].Phase = 'err'
+            } else {
+                $dl = if (Test-Path $dj.Dest) { (Get-Item $dj.Dest).Length } else { $st[$nm].TotalBytes }
+                $st[$nm].DlBytes  = $dl
+                if ($st[$nm].TotalBytes -eq 0L) { $st[$nm].TotalBytes = $dl }
+                $st[$nm].Pct   = 100
+                $st[$nm].Phase = 'wait-in'
+            }
+            Remove-Job -Job $dj.Job -Force
+            [Console]::SetCursorPosition(0, $tableRow + $rowOf[$nm])
+            Render-ProgressRow $nm $st[$nm] $w
+        }
+
+        [Console]::SetCursorPosition(0, $timerRow)
+        Write-Host (" " * ($w - 1)) -NoNewline
+    }
+    [Console]::SetCursorPosition(0, $afterRow)
+
+    # Faza 3: instalacja — Start-Job na kazdy dep, zeby nie brudzic konsoli
+    $whisperTask = $null
+
     foreach ($t in $tasks) {
         $dep  = $t.Dep
         $name = $dep.Name
@@ -235,35 +415,106 @@ function Invoke-Dependencies {
         switch ($t.Mode) {
             'reuse' {
                 $manifest[$dep.Command] = $dep.ManifestEntry('system', $RuntimeDir, $InstallDir)
-                Write-OK "$name — tryb systemowy (reuse)"
             }
             'system' {
-                Write-Host "`n  Instaluje $name (systemowo)..." -ForegroundColor Yellow
-                if ($dep.Install()) {
-                    $manifest[$dep.Command] = $dep.ManifestEntry('system', $RuntimeDir, $InstallDir)
-                    Write-OK "$name zainstalowany (systemowo)"
-                } else {
-                    Write-Missing "Instalacja $name nieudana"
-                }
+                $st[$name].Phase     = 'inst'
+                $st[$name].StartedAt = Get-Date
+                [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
+                Render-ProgressRow $name $st[$name] $w
+                [Console]::SetCursorPosition(0, $afterRow)
+
+                $ok = & { $dep.Install() } 6>$null
+
+                $st[$name].Phase = if ($ok) { 'ok' } else { 'err' }
+                [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
+                Render-ProgressRow $name $st[$name] $w
+                [Console]::SetCursorPosition(0, $afterRow)
+                if ($ok) { $manifest[$dep.Command] = $dep.ManifestEntry('system', $RuntimeDir, $InstallDir) }
             }
             'portable' {
+                if ($name -eq 'whisper') { $whisperTask = $t; continue }
+                if ($st[$name].Phase -eq 'err') { continue }
+
                 if (-not (Test-Path $RuntimeDir)) { New-Item -ItemType Directory -Path $RuntimeDir -Force | Out-Null }
-                Write-Host "`n  Instaluje $name (portable)..." -ForegroundColor Yellow
-                $ok = if ($t.ZipDest -and (Test-Path $t.ZipDest)) {
-                    $dep.InstallFromZip($t.ZipDest, $RuntimeDir)
-                } else {
-                    $dep.InstallPortable($RuntimeDir)
+
+                $sb        = $null
+                $sbArgList = @()
+                if ($name -eq 'Python')   { $sb = $sbPython;   $sbArgList = @($t.ZipDest, $RuntimeDir) }
+                if ($name -eq 'ffmpeg')   { $sb = $sbFfmpeg;   $sbArgList = @($t.ZipDest, $RuntimeDir) }
+                if ($name -eq 'mkvmerge') { $sb = $sbMkvmerge; $sbArgList = @($t.ZipDest, $RuntimeDir) }
+                if (-not $sb) { continue }
+
+                $st[$name].Phase     = 'inst'
+                $st[$name].StartedAt = Get-Date
+                [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
+                Render-ProgressRow $name $st[$name] $w
+                [Console]::SetCursorPosition(0, $afterRow)
+
+                $instJob = Start-Job -ScriptBlock $sb -ArgumentList $sbArgList
+                while ($instJob.State -eq 'Running') {
+                    [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
+                    Render-ProgressRow $name $st[$name] $w
+                    [Console]::SetCursorPosition(0, $afterRow)
+                    Start-Sleep -Milliseconds 400
                 }
+
+                $result = Receive-Job -Job $instJob -ErrorAction SilentlyContinue
+                $ok     = ($instJob.State -ne 'Failed') -and ($result -eq $true)
+                Remove-Job -Job $instJob -Force
+
+                $st[$name].Phase = if ($ok) { 'ok' } else { 'err' }
+                [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
+                Render-ProgressRow $name $st[$name] $w
+                [Console]::SetCursorPosition(0, $afterRow)
+
                 if ($ok) {
                     $manifest[$dep.Command] = $dep.ManifestEntry('portable', $RuntimeDir, $InstallDir)
                     $needRuntime = $true
-                    Write-OK "$name zainstalowany (portable)"
-                } else {
-                    Write-Missing "Instalacja portable $name nieudana"
                 }
             }
         }
     }
+
+    # Whisper (pip, wolny) — musi byc po instalacji Pythona
+    if ($whisperTask) {
+        $dep  = $whisperTask.Dep
+        $name = $dep.Name
+        if (-not (Test-Path $RuntimeDir)) { New-Item -ItemType Directory -Path $RuntimeDir -Force | Out-Null }
+        $pyExe = Join-Path $RuntimeDir "python\python.exe"
+
+        if (-not (Test-Path $pyExe)) {
+            $st[$name].Phase = 'err'
+        } else {
+            $st[$name].Phase     = 'pip'
+            $st[$name].StartedAt = Get-Date
+            [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
+            Render-ProgressRow $name $st[$name] $w
+            [Console]::SetCursorPosition(0, $afterRow)
+
+            $pipJob = Start-Job -ScriptBlock $sbWhisper -ArgumentList $pyExe
+            while ($pipJob.State -eq 'Running') {
+                [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
+                Render-ProgressRow $name $st[$name] $w
+                [Console]::SetCursorPosition(0, $afterRow)
+                Start-Sleep -Milliseconds 500
+            }
+
+            $whisperOk = Receive-Job -Job $pipJob -ErrorAction SilentlyContinue
+            Remove-Job -Job $pipJob -Force
+            $st[$name].Phase = if ($whisperOk -eq $true) { 'ok' } else { 'err' }
+        }
+
+        [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
+        Render-ProgressRow $name $st[$name] $w
+        [Console]::SetCursorPosition(0, $afterRow)
+
+        if ($st[$name].Phase -eq 'ok') {
+            $manifest[$dep.Command] = $dep.ManifestEntry('portable', $RuntimeDir, $InstallDir)
+            $needRuntime = $true
+        }
+    }
+
+    Write-Host ""
 
     if ($manifest.Count -gt 0) {
         $runtimeFile = Join-Path $InstallDir "runtime.json"
