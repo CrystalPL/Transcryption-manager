@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Manager" type="ShConfigurationType">
-    <option name="SCRIPT_TEXT" value="$env:TRANSCRIPTION_CONFIG_DIR='$PROJECT_DIR$\.workspace'; $env:TRANSCRIPTION_LOGS_DIR='$PROJECT_DIR$\.workspace\logi'; $env:TRANSCRIPTION_OUTPUT_DIR='$PROJECT_DIR$\.workspace\Wyniki'; $env:TRANSCRIPTION_FARM_DIR='$PROJECT_DIR$\.workspace\Farma'; $env:TRANSCRIPTION_RUNTIME_FILE='$PROJECT_DIR$\.workspace\runtime.json'; Start-Process powershell.exe -WorkingDirectory '$PROJECT_DIR$\src' -ArgumentList '-NoExit','-ExecutionPolicy','Bypass','-File','.\Manager.ps1'" />
+  <configuration default="false" name="Install (lokalnie)" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="Start-Process powershell.exe -WorkingDirectory '$PROJECT_DIR$' -ArgumentList '-NoExit','-ExecutionPolicy','Bypass','-File','.\install.ps1','-SkipDownload'" />
     <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
     <option name="SCRIPT_PATH" value="" />
     <option name="SCRIPT_OPTIONS" value="" />

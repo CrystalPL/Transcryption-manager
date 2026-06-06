@@ -49,51 +49,19 @@ function Ask-TakNie {
 }
 
 <#
-.SYNOPSIS Wybor sposrod listy opcji (1, 2, 3... lub Esc).
-.EXAMPLE Ask-Choice "Wybor backendu" @("Claude", "Gemini", "Ollama")
+.SYNOPSIS Czyta decyzje z ekranu podsumowania: T/Enter=start, W=back, Q/Esc=cancel.
+.DESCRIPTION Blokuje az do nacisniecia rozpoznanego klawisza. Zwraca string
+'start' | 'back' | 'cancel'. Pozostale klawisze ignorowane.
 #>
-function Ask-Choice {
-    param(
-        [string]$Question,
-        [string[]]$Options,
-        [int]$Default = 0
-    )
-    Write-Host ""
-    Write-Host "  $Question" -ForegroundColor Yellow
-    for ($i = 0; $i -lt $Options.Count; $i++) {
-        $marker = if ($i -eq $Default) { ">" } else { " " }
-        Write-Host ("   $marker $($i+1)  $($Options[$i])") -ForegroundColor White
-    }
-    Write-Host "  Wybor: " -NoNewline -ForegroundColor Yellow
-
-    while ($true) {
+function Read-StartBackCancel {
+    $decision = $null
+    while (-not $decision) {
         $k = [Console]::ReadKey($true)
-        if ($k.Key -eq 'Enter') {
-            Write-Host ($Default + 1) -ForegroundColor Green
-            return $Default
-        }
-        if ($k.Key -eq 'Escape') { Write-Host "anulowano" -ForegroundColor DarkGray; return -1 }
-        $c = $k.KeyChar
-        if ($c -match '\d') {
-            $n = [int][string]$c - 1
-            if ($n -ge 0 -and $n -lt $Options.Count) {
-                Write-Host ($n + 1) -ForegroundColor Green
-                return $n
-            }
-        }
+        $c = [char]::ToLower($k.KeyChar)
+        if ($c -eq 't' -or $k.Key -eq 'Enter') { $decision = 'start'  }
+        elseif ($c -eq 'w')                     { $decision = 'back'   }
+        elseif ($c -eq 'q' -or $k.Key -eq 'Escape') { $decision = 'cancel' }
     }
+    return $decision
 }
 
-<#
-.SYNOPSIS Pyta o tekst od uzytkownika. Pusta odpowiedz = $null.
-#>
-function Ask-Text {
-    param([string]$Prompt, [string]$DefaultValue = "")
-    $hint = if ($DefaultValue) { " (Enter = $DefaultValue)" } else { "" }
-    Write-Host ""
-    Write-Host "  $Prompt$hint" -ForegroundColor Yellow
-    Write-Host "  > " -NoNewline -ForegroundColor White
-    $input = Read-Host
-    if (-not $input) { return $DefaultValue }
-    return $input.Trim()
-}

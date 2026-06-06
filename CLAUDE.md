@@ -6,8 +6,8 @@ Kontekst projektu dla przyszłych sesji Claude Code (i deweloperów). Czytaj na 
 
 PowerShell TUI do pracy z transkrypcjami nagrań:
 1. **Whisper** generuje SRT/VTT z plików wideo (`New-Transcription.ps1`)
-2. **LLM** (Claude / Gemini / Ollama) zamienia SRT w XML Matroska Chapters (`New-Chapters.ps1`)
-3. **mkvmerge** wpina XML do MKV bez ponownego kodowania (`Add-Chapters.ps1`)
+2. **mkvmerge** wpina rozdziały (XML Matroska Chapters) do MKV bez ponownego kodowania (`Add-Chapters.ps1`)
+3. **Farma** rozdziela transkrypcje na wiele maszyn przez kolejkę na wspólnym folderze (`Send-FarmJobs.ps1`, `Start-FarmWorker.ps1`, `Watch-Farm.ps1`)
 
 Cała aplikacja to PowerShell 5.1 + Windows Forms (do dialogów folderu) + native cmd-line tools (whisper, mkvmerge). Brak zależności od PowerShell 7.
 
@@ -21,18 +21,40 @@ src/
 │   ├── Ansi.ps1             # 2. ESC, Get-AnsiFg/Bg, Wrap-Ansi, Build-Row (+ VT enable)
 │   ├── Console.ps1          # 3. Get-ConsoleWidth, Show-Header, Ask-TakNie, Ask-Choice
 │   ├── Config.ps1           # 4. Read-Config, Save-Config, Update-Config (JSON)
-│   ├── Dialog.ps1           # 5. Open-FolderDialog, Select-Folder (System.Windows.Forms)
-│   ├── ShellMetadata.ps1    # 6. Get-ShellDurations, Read-FileSafe
-│   ├── Picker.ps1           # 7. Show-Picker (single-select + nawigacja po katalogach)
-│   ├── MultiPicker.ps1      # 8. Show-MultiPicker (multi-select, Spacja zaznacza)
-│   └── Dashboard.ps1        # 9. Render-Dashboard, View-Logs, Get-WhisperProgressSec
+│   ├── Runtime.ps1          # 5. Get-RuntimeManifest, Resolve-Tool, Initialize-RuntimePath (portable runtime)
+│   ├── Dialog.ps1           # 6. Open-FolderDialog, Select-Folder (System.Windows.Forms)
+│   ├── ShellMetadata.ps1    # 7. Get-ShellDurations, Read-FileSafe
+│   ├── Whisper.ps1          # 8. Start-WhisperJob, Finalize-WhisperJob, New-WhisperState
+│   ├── Picker.ps1           # 9. Show-Picker (single-select + nawigacja po katalogach)
+│   ├── MultiPicker.ps1      # 10. Show-MultiPicker (multi-select, Spacja zaznacza)
+│   ├── Dashboard.ps1        # 11. Render-Dashboard, View-Logs, Get-WhisperProgressSec
+│   ├── Farm.ps1             # 12. kolejka farmy — claim/heartbeat/reclaim zleceń na wspólnym folderze
+│   └── LoadOrder.ps1        # ładowany jawnie PIERWSZY: Get-LibLoadOrder — kolejność ładowania powyższych
 └── Scripts/
     ├── New-Transcription.ps1   # whisper + dashboard z live progress
-    ├── New-Chapters.ps1        # SRT -> XML przez API/Ollama
-    └── Add-Chapters.ps1        # XML -> MKV przez mkvmerge
+    ├── Add-Chapters.ps1        # XML -> MKV przez mkvmerge
+    ├── Send-FarmJobs.ps1       # farma: zlecanie zadań do kolejki (todo\)
+    ├── Start-FarmWorker.ps1    # farma: worker — zatrzaskuje i wykonuje zlecenia
+    └── Watch-Farm.ps1          # farma: monitor kolejki + workerów + reclaim zombie
 ```
 
+Pakowanie do instalatora: `build/` (`Build-Installer.ps1`, `installer-main.ps1`) + workflow CI `.github/workflows/release.yml`.
+
 Każdy `Scripts/*.ps1` zakłada że wszystkie `lib/*` są już załadowane (dot-source'owane przez Manager.ps1). Nigdy nie uruchamiaj `New-Transcription.ps1` bezpośrednio — tylko przez Managera.
+
+## Farma transkrypcji (kolejka na wspólnym folderze)
+
+Tryb rozproszony: wiele maszyn LAN dzieli wspólny folder (UNC) jako kolejkę.
+- `Send-FarmJobs.ps1` — główny komp pisze deskryptory `job-<id>.json` do `todo\`.
+- `Start-FarmWorker.ps1` — worker atomowo zatrzaskuje zlecenie (`Move-Item` todo→claimed),
+  odpala whispera, odświeża heartbeat co ~10s, wynik → `done\`/`failed\`.
+- `Watch-Farm.ps1` — monitor: liczniki + tabela workerów + cykliczny reclaim (>120s = zombie).
+
+Folder kolejki: `todo/claimed/done/failed/workers`. Atomowość claim oparta na atomowym
+rename SMB (przegrany dostaje wyjątek na `Move-Item`, bierze następne). Config:
+`Farm.config.json` (gitignore), env-override `TRANSCRIPTION_FARM_DIR` → `queuePath`.
+Wspólna logika whispera w `lib/Whisper.ps1` (`Start-WhisperJob`/`Finalize-WhisperJob`).
+Monitor uruchamia lokalnego workera jako OSOBNY PROCES (komunikacja przez `workers\*.json`).
 
 ## Krytyczne ograniczenia PowerShell 5.1
 
@@ -223,10 +245,32 @@ Działa potem `Get-Help Show-Picker -Full`.
 
 ### Brak komentarzy "co robi linia"
 
-Komentuj **WHY** (powód decyzji, hidden gotcha), nie **WHAT** (to widać z kodu). Jak coś jest nieoczywiste — krótki komentarz. Jeśli kod się tłumaczy sam — bez komentarza.
+Komentuj **WHY** (powód decyzji, hidden gotcha, nieoczywisty workaround), **NIGDY WHAT** (to widać z kodu). Jeśli kod się tłumaczy sam — bez komentarza.
 
-OK: `# PYTHONUNBUFFERED — bez tego logi sa puste az do zakonczenia procesu`
-NIE: `# Iteruj po plikach` przed `foreach ($f in $files)`.
+**OK** (wyjaśnia powód/gotcha):
+```powershell
+# PYTHONUNBUFFERED — bez tego logi sa puste az do zakonczenia procesu
+$env:PYTHONUNBUFFERED = "1"
+
+# pip jest dostarczany z instalacją Pythona — osobno nie da się go zainstalować
+[bool] Install() { return $false }
+```
+
+**NIE** (opisuje co robi następna linia):
+```powershell
+# Iteruj po plikach
+foreach ($f in $files) { ... }
+
+# Pobierz najnowszego Pythona 3.x z winget (winget nie ma aliasu "latest")
+$LatestPython = (winget search ...)
+
+# Sprawdza czy zależność jest dostępna w PATH
+[bool] Test() { return $null -ne (Get-Command $this.Command -EA SilentlyContinue) }
+```
+
+Jeśli nazwa funkcji + body są oczywiste — nie pisz komentarza nad nimi. `LatestPackageId()`, `Test()`, `Install()` w klasie `Dependency` tłumaczą się same.
+
+Również NIE rób komentarzy "sekcyjnych" w stylu `# --- Python ---` nad każdą klasą gdy nazwa klasy mówi to samo (`class PythonDependency`).
 
 ### Ścieżki — używaj `$PSCommandPath` nie `$PSScriptRoot`
 
@@ -255,6 +299,8 @@ $ProjectRoot = Split-Path $PSCommandPath -Parent | Split-Path -Parent
 $ConfigDir  = if ($env:TRANSCRIPTION_CONFIG_DIR) { $env:TRANSCRIPTION_CONFIG_DIR } else { $ProjectRoot }
 $LogsRoot   = if ($env:TRANSCRIPTION_LOGS_DIR)   { $env:TRANSCRIPTION_LOGS_DIR }   else { Join-Path $ProjectRoot "logi" }
 $DefaultOut = if ($env:TRANSCRIPTION_OUTPUT_DIR) { $env:TRANSCRIPTION_OUTPUT_DIR } else { Join-Path $ProjectRoot "Wyniki" }
+$RuntimeFile = if ($env:TRANSCRIPTION_RUNTIME_FILE) { $env:TRANSCRIPTION_RUNTIME_FILE } else { Join-Path $ProjectRoot "runtime.json" }
+$FarmDir    = if ($env:TRANSCRIPTION_FARM_DIR)   { $env:TRANSCRIPTION_FARM_DIR }   else { $cfg.queuePath }
 ```
 
 **NIE hardkoduj `C:\Transkrypcja` jako fallback** — install.ps1 ma flagę `-InstallDir`, user może mieć aplikację gdziekolwiek.
@@ -266,10 +312,21 @@ IntelliJ run config (`.idea/runConfigurations/Manager.xml`) ustawia te env vars:
     <env name="TRANSCRIPTION_CONFIG_DIR" value="$PROJECT_DIR$\workspace" />
     <env name="TRANSCRIPTION_LOGS_DIR" value="$PROJECT_DIR$\.workspace\logi" />
     <env name="TRANSCRIPTION_OUTPUT_DIR" value="$PROJECT_DIR$\.workspace\Wyniki" />
+    <env name="TRANSCRIPTION_RUNTIME_FILE" value="$PROJECT_DIR$\.workspace\runtime.json" />
+    <env name="TRANSCRIPTION_FARM_DIR" value="$PROJECT_DIR$\.workspace\Farma" />
 </envs>
 ```
 
+(Manager.xml realnie ustawia te zmienne inline w `SCRIPT_TEXT` przez `$env:...='...'` przed `Start-Process`, nie w bloku `<envs>` — efekt ten sam.)
+
 `.workspace/` jest w gitignore (poza `.gitkeep`) — configs, logi, wyniki nie są commitowane.
+
+Aktualne env-vary nadpisujące domyślne ścieżki:
+- `TRANSCRIPTION_CONFIG_DIR` → katalog configów (default: root instalacji)
+- `TRANSCRIPTION_LOGS_DIR` → katalog logów (default: `<root>\logi`)
+- `TRANSCRIPTION_OUTPUT_DIR` → katalog wyników (default: `<root>\Wyniki`)
+- `TRANSCRIPTION_RUNTIME_FILE` → ścieżka `runtime.json` (default: `<root>\runtime.json`)
+- `TRANSCRIPTION_FARM_DIR` → folder kolejki farmy, nadpisuje `queuePath` z `Farm.config.json`
 
 **Dodawanie kolejnych env vars** — dla nowego ustawienia konfiguracyjnego:
 1. Skrypt: `$X = if ($env:TRANSCRIPTION_X) { $env:TRANSCRIPTION_X } else { default }`
@@ -280,15 +337,29 @@ IntelliJ run config (`.idea/runConfigurations/Manager.xml`) ustawia te env vars:
 
 Każdy Script ma swój config obok pliku w `src/`:
 - `New-Transcription.config.json` (lastSourceDir, lastOutputDir, fp16)
-- `New-Chapters.config.json` (lastSrtDir, backend, ollamaModel)
 - `Add-Chapters.config.json` (lastVideoDir, lastXmlDir)
-
-API keys (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) jako User Environment Variables, NIE w configu (config jest w gitignore ale i tak — sekrety osobno).
 
 Funkcje z `Config.ps1`:
 - `Read-Config -Path $cfg -Default @{...}` — zwraca PSCustomObject, fallback default
 - `Save-Config -Path $cfg -Data @{...}` — pełny overwrite
 - `Update-Config -Path $cfg -Key 'x' -Value $v` — tylko jeden klucz, reszta zachowana
+
+## Runtime portable / manifest ścieżek
+
+Instalator pozwala wybrać per narzędzie (Python, Whisper, ffmpeg, mkvmerge) tryb
+**systemowy** (winget/pip, jak dotąd) albo **portable** (do `runtime\` w folderze
+instalacji). Ścieżki zapamiętane są w `runtime.json` w roocie instalacji:
+
+- `mode: "portable"` → ścieżka **relatywna do roota** (`runtime\...`), liczona z `$PSCommandPath`.
+- `mode: "system"`   → goła nazwa polecenia (`ffmpeg`), rozwiązywana przez PATH.
+
+`src/lib/Runtime.ps1` (ładowana w Managerze po `Config.ps1`):
+- `Get-RuntimeManifest` — czyta `runtime.json` (lub `$env:TRANSCRIPTION_RUNTIME_FILE`). Brak → `$null`.
+- `Initialize-RuntimePath` — dopisuje katalogi portable na początek `$env:PATH` (whisper
+  odpala ffmpeg przez subprocess i znajduje go po PATH — dlatego prepend, nie przepisywanie skryptów).
+
+Brak `runtime.json` = pełna wsteczna kompatybilność (stare instalacje działają po staremu).
+`runtime.json` i `runtime/` są w gitignore. Manifest zapisywany z `-Encoding UTF8`.
 
 ## Dashboard whispera — jak działa progress
 
@@ -331,28 +402,6 @@ while ($true) {
 # 4. Logika
 # 5. Read-Host na końcu żeby user widział wyniki przed powrotem do menu
 ```
-
-## Dodawanie nowego backendu AI (do New-Chapters)
-
-W `New-Chapters.ps1` w `Ask-Choice` dodaj nową opcję, w `switch ($backend)` dodaj case. Wzorzec:
-
-```powershell
-'mojbackend' {
-    $key = Get-ApiKey "MOJBACKEND_API_KEY" "Moj Backend"
-    if (-not $key) { return }
-
-    $body = @{ ... } | ConvertTo-Json -Depth 5
-    try {
-        $resp = Invoke-RestMethod -Method Post -Uri "..." -Headers @{...} -Body $body
-        $response = $resp.text   # struktura zależna od API
-    } catch {
-        Write-Host "BLAD: $_" -ForegroundColor Red
-        return
-    }
-}
-```
-
-Response zawsze jako string w `$response`. Reszta skryptu (wyciągnięcie XML z markdownu, zapis pliku) jest wspólna.
 
 ## Testowanie
 
@@ -434,6 +483,68 @@ if ($result.Count -eq 0) { ... }
 
 Nie polegaj tylko na `if (-not $result)` — `@("", $null)` jest truthy.
 
+## Architektura i SOLID
+
+Projekt stosuje **Single Responsibility** dosłownie — jeden plik, jedna odpowiedzialność. Struktury folderów grupują rzeczy po **concern** (rzecz którą plik załatwia), nie po typie pliku.
+
+### Struktura `install/`
+
+```
+install/
+├── Core/                      # primitives uzywane przez wszystko
+│   ├── Logging.ps1           # Write-OK/Skip/Missing/Info, Test-Command
+│   └── UI.ps1                # Ask-YN, Show-Header, Get-InstallDir, Show-Summary
+├── Dependencies/              # klasy zaleznosci (1 plik = 1 klasa)
+│   ├── Dependency.ps1        # abstract base
+│   ├── PythonDependency.ps1
+│   ├── PipDependency.ps1
+│   ├── FfmpegDependency.ps1
+│   ├── MkvmergeDependency.ps1
+│   └── WhisperDependency.ps1
+└── Phases/                    # workflow steps
+    ├── Install.ps1
+    ├── SystemCheck.ps1
+    ├── CopyApp.ps1
+    ├── Dependencies.ps1
+    └── Shortcut.ps1
+```
+
+### Reguły dziedziczone z SOLID
+
+- **S — Single Responsibility**: każdy plik ma JEDNĄ odpowiedzialność, którą można nazwać w jednej linii. Jeśli musisz pisać "i" w opisie pliku — rozdziel.
+
+- **O — Open/Closed**: rozszerzaj projekt przez **dodawanie plików**, nie modyfikowanie istniejących. Dodać nową zależność → nowy plik w `Dependencies/`, instalator sam ją wykryje przez `Get-ChildItem -Filter *Dependency.ps1`. Bez ruszania `Phases/Dependencies.ps1`.
+
+- **L — Liskov Substitution**: każda klasa pochodna od `Dependency` musi działać poprawnie wszędzie gdzie używana jest `Dependency`. Nie łam kontraktu — `Install()` zawsze zwraca `[bool]`, `Test()` zawsze zwraca `[bool]`, nigdy nie throw.
+
+- **I — Interface Segregation**: klasa `Dependency` ma tylko 2 metody publiczne (`Test`, `Install`). Nie dodawaj `Uninstall`, `Update`, `Diagnose` itp. dopóki ktoś tego nie używa — YAGNI.
+
+- **D — Dependency Inversion**: `Phases/Dependencies.ps1` operuje na abstrakcji `Dependency`, nie na konkretnych klasach. Można podmienić listę zależności bez edycji fazy.
+
+### Reguły praktyczne czystego kodu
+
+- **Plik = jedna eksportowana rzecz**: `PythonDependency.ps1` zawiera klasę `PythonDependency`, nic więcej.
+- **Nazwa pliku == nazwa głównego eksportu**: jeśli plik nazywa się `Dependencies.ps1` w `Phases/`, główna funkcja to `Invoke-Dependencies`.
+- **Niezależne funkcje w jednym pliku**: jeśli kilka małych funkcji służy temu samemu celowi (jak `Write-OK`/`Write-Skip`/`Write-Missing` w `Logging.ps1`), trzymaj je razem. Inaczej rozdziel.
+- **Subfolder ma sensowne grupowanie**: `Core/`, `Dependencies/`, `Phases/` — każdy ma czytelny "po co tu jestem". Nie twórz `Utils/`, `Helpers/`, `Misc/` — to znaki że nie wiesz po co plik istnieje.
+- **Entrypoint to indeks zawartości**: `install.ps1` ma być zwięzły. Czytasz go i widzisz CO się dzieje (`Show-Header`, `Invoke-SystemCheck`, ...), nie JAK.
+
+### Reguła workflow: `git add` po każdej zmianie
+
+Po każdej operacji write/edit/move/delete plików — bez wyjątku — wykonaj:
+
+```powershell
+git add .
+```
+
+Powodów kilka:
+- IDE pokazuje status (added/modified) — wiesz dokładnie co poszło i czy nic się nie zgubiło.
+- `git diff --cached` pokazuje to co poleci na commit, łatwiej review przed `git commit`.
+- W razie rozwałki łatwo wrócić do ostatniego dodanego stanu przez `git reset --hard`.
+- Nieotrackowane pliki nie są zauważane przez większość narzędzi git (linters, hooks, gh CLI).
+
+Wyjątek: jeśli świadomie testujesz coś co później ma być wyrzucone — ZRÓB osobny stash zamiast nie-stage'owania.
+
 ## Ważne — czego NIE robić
 
 - **NIE używać Register-ObjectEvent** do capture stdout w pętlach pollujących
@@ -445,6 +556,44 @@ Nie polegaj tylko na `if (-not $result)` — `@("", $null)` jest truthy.
 - **NIE używać PS 7 syntax** (ternary, `??`, `?.`) — projekt musi działać na czystym Win10/11
 - **NIE commitować `*.config.json`** — są w gitignore, mają lokalne ścieżki użytkownika
 
+## Pipeline release i folder `build/`
+
+Workflow `.github/workflows/release.yml` (runs-on `windows-latest`, Windows PowerShell 5.1)
+odpala się na dwa triggery z różnym zakresem pracy.
+
+### Co robi workflow
+
+**Przy każdym pushu do `master`:**
+1. `git describe --tags` → wersja (fallback `v0.0.0-<rev-count>-g<sha>`).
+2. `Compress-Archive -Path src -DestinationPath src.zip`.
+3. Buduje installer prerelease przez `build/Build-Installer.ps1` (URL do konkretnego tagu).
+4. `gh release create <tag> ... --prerelease` — prerelease z `installer.ps1` + `src.zip`.
+
+**Dodatkowo przy pushu tagu `v*` (np. `v1.2.3`):**
+5. Buduje installer latest przez `build/Build-Installer.ps1` (URL do `releases/latest`).
+6. Usuwa wszystkie pośrednie prereleasy + tagi pasujące do `v1.2.3-N-gabcdef` (poprzedni cykl).
+7. `gh release create/upload latest` — stały Release `latest` dla one-linera
+   `irm .../releases/latest/download/installer.ps1 | iex`.
+
+`GH_TOKEN` = `${{ secrets.GITHUB_TOKEN }}`, `permissions: contents: write`.
+
+### Folder `build/`
+
+| Plik | Odpowiedzialność |
+|---|---|
+| `build/Build-Installer.ps1` | Skleja (konkatenacja z markerami `# === <relpath> ===`) nagłówek + `install/Core/*` + `install/Dependencies/*` (Dependency.ps1 pierwszy) + `install/Phases/*` + `build/installer-main.ps1` w jeden `installer.ps1`. Podstawia `@@TM_VERSION@@`/`@@TM_SRC_URL@@`. **Zapisuje wynik z UTF-8 BOM** (`[System.IO.File]::WriteAllText(... UTF8Encoding($true))`) — bez tego PS 5.1 zepsuje polskie znaki w komunikatach installera. Fail builda gdy brak pliku, zostały `@@`, lub błąd `PSParser::Tokenize`. |
+| `build/installer-main.ps1` | „Ogon" doklejany na koniec `installer.ps1`: pobiera `$script:TM_SRC_URL` do TEMP, `Expand-Archive`, znajduje katalog z `src/`, woła `Invoke-Install`. NIE dot-source'uje `install/` (definicje są inline po konkatenacji). |
+
+### Orkiestracja: `Invoke-Install`
+
+`install/Phases/Install.ps1` zawiera `Invoke-Install -RepoRoot -InstallDir [-NoShortcut]
+[-NoDeps] [-LogFile]` — wspólna sekwencja faz (Show-Header → Get-InstallDir →
+Invoke-SystemCheck → Invoke-CopyApp → Invoke-Dependencies → Invoke-Shortcut →
+Show-Summary). Używana przez `install.ps1` (dev/klon, ładuje `install/` z dysku) i przez
+`build/installer-main.ps1` (release, definicje inline). RepoRoot = katalog zawierający `src/`.
+
+`installer.ps1` i `src.zip` są w `.gitignore` (generowane w CI, nie commitowane).
+
 ## Linki dokumentacja
 
 - PowerShell 5.1: https://learn.microsoft.com/en-us/powershell/scripting/overview?view=powershell-5.1
@@ -452,7 +601,4 @@ Nie polegaj tylko na `if (-not $result)` — `@("", $null)` jest truthy.
 - Whisper CLI: https://github.com/openai/whisper#command-line-usage
 - mkvmerge --chapters: https://mkvtoolnix.download/doc/mkvmerge.html#mkvmerge.description.chapters
 - Matroska Chapters XML: https://mkvtoolnix.download/doc/mkvmerge.html#mkvmerge.chapter_files
-- Anthropic API: https://docs.anthropic.com/en/api/messages
-- Gemini API: https://ai.google.dev/api/rest
-- Ollama API: https://github.com/ollama/ollama/blob/main/docs/api.md
 - winget docs: https://learn.microsoft.com/en-us/windows/package-manager/winget/

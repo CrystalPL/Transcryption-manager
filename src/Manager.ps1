@@ -15,21 +15,18 @@ $LibDir     = Join-Path $ScriptRoot "lib"
 $ScriptsDir = Join-Path $ScriptRoot "Scripts"
 
 # ============== ZALADUJ WSZYSTKIE BIBLIOTEKI ==============
-# Kolejnosc wazna: Format -> Ansi -> Console -> reszta
-$libOrder = @(
-    "Format.ps1",
-    "Ansi.ps1",
-    "Console.ps1",
-    "Config.ps1",
-    "Dialog.ps1",
-    "ShellMetadata.ps1",
-    "Picker.ps1",
-    "MultiPicker.ps1",
-    "Dashboard.ps1"
-)
+# Kolejnosc wazna: Format -> Ansi -> Console -> reszta.
+# Lista pochodzi z LoadOrder.ps1 (jedno zrodlo prawdy, wspoldzielone z bootstrapem
+# workera w Watch-Farm.ps1). LoadOrder.ps1 ladujemy jawnie -- nie ma go w liscie.
+. (Join-Path $LibDir 'LoadOrder.ps1')
+$libOrder = Get-LibLoadOrder
 foreach ($libFile in $libOrder) {
     . (Join-Path $LibDir $libFile)
 }
+
+# Dopisz portable narzedzia (runtime.json) na poczatek PATH -- whisper sam odpala
+# ffmpeg przez subprocess i znajduje go po PATH, wiec MUSI tu trafic. No-op bez manifestu.
+Initialize-RuntimePath
 
 # ============== MENU GLOWNE ==============
 function Show-MainMenu {
@@ -61,10 +58,28 @@ function Show-MainMenu {
     Write-Host (Fit ("  " + "-" * ($w - 2)) $w) -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  " -NoNewline
+    Write-Host " 3 " -ForegroundColor Black -BackgroundColor Magenta -NoNewline
+    Write-Host "  Farma: dodaj zlecenia" -ForegroundColor White
+    Write-Host "      Wrzuca pliki do kolejki na wspólnym folderze (dla wielu maszyn)" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  " -NoNewline
+    Write-Host " 4 " -ForegroundColor Black -BackgroundColor Magenta -NoNewline
+    Write-Host "  Farma: tryb workera" -ForegroundColor White
+    Write-Host "      Ta maszyna bierze zlecenia z kolejki i transkrybuje" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  " -NoNewline
+    Write-Host " 5 " -ForegroundColor Black -BackgroundColor Magenta -NoNewline
+    Write-Host "  Farma: monitor" -ForegroundColor White
+    Write-Host "      Podgląd liczników kolejki i stanu maszyn" -ForegroundColor DarkGray
+    Write-Host ""
+
+    Write-Host (Fit ("  " + "-" * ($w - 2)) $w) -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  " -NoNewline
     Write-Host " Q " -ForegroundColor Black -BackgroundColor DarkGray -NoNewline
     Write-Host "  Wyjście" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Naciśnij 1, 2 lub Q..." -ForegroundColor DarkGray
+    Write-Host "  Naciśnij 1-5 lub Q..." -ForegroundColor DarkGray
 }
 
 function Invoke-Script {
@@ -88,6 +103,9 @@ while ($true) {
     switch ($c) {
         '1' { Invoke-Script "New-Transcription.ps1" }
         '2' { Invoke-Script "Add-Chapters.ps1" }
+        '3' { Invoke-Script "Send-FarmJobs.ps1" }
+        '4' { Invoke-Script "Start-FarmWorker.ps1" }
+        '5' { Invoke-Script "Watch-Farm.ps1" }
         default {
             if ($c -eq 'q' -or $k.Key -eq 'Escape') {
                 Clear-Host

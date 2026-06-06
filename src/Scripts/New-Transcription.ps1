@@ -1,7 +1,6 @@
 ﻿# New-Transcription.ps1 -- generowanie transkrypcji whisperem z dashboard'em postepu
 
-$VideoExtensions = @('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.m4v',
-                     '.mpg', '.mpeg', '.ts', '.mts', '.m2ts', '.webm')
+$VideoExtensions = Get-VideoExtensions
 
 # Sciezki: env vars (IntelliJ dev) -> w innym wypadku obok zainstalowanej aplikacji.
 # $PSCommandPath to lokalizacja TEGO skryptu (Scripts/New-Transcription.ps1),
@@ -14,12 +13,6 @@ $ConfigPath = Join-Path $ConfigDir "New-Transcription.config.json"
 
 $LogsRoot   = if ($env:TRANSCRIPTION_LOGS_DIR)   { $env:TRANSCRIPTION_LOGS_DIR }   else { Join-Path $ProjectRoot "logi" }
 $DefaultOut = if ($env:TRANSCRIPTION_OUTPUT_DIR) { $env:TRANSCRIPTION_OUTPUT_DIR } else { Join-Path $ProjectRoot "Wyniki" }
-
-# Sprawdz whispera — Get-Command sprawdza tylko czy w PATH, nie odpala procesu
-# (poprzednia wersja whisper --help bywala zawodna gdy whisper zwracal non-zero exit)
-function Test-Whisper {
-    return $null -ne (Get-Command whisper -ErrorAction SilentlyContinue)
-}
 
 if (-not (Test-Whisper)) {
     Show-Header -Title "Tworzenie transkrypcji" -Subtitle "BLAD: nie znaleziono whispera"
@@ -101,14 +94,7 @@ while ($true) {
     Write-Host "  " -NoNewline; Write-Host " Q " -ForegroundColor Black -BackgroundColor DarkGray -NoNewline; Write-Host "  Anuluj"                 -ForegroundColor DarkGray
     Write-Host ""
 
-    $decision = $null
-    while (-not $decision) {
-        $k = [Console]::ReadKey($true)
-        $c = [char]::ToLower($k.KeyChar)
-        if ($c -eq 't' -or $k.Key -eq 'Enter') { $decision = 'start'  }
-        elseif ($c -eq 'w')                     { $decision = 'back'   }
-        elseif ($c -eq 'q' -or $k.Key -eq 'Escape') { $decision = 'cancel' }
-    }
+    $decision = Read-StartBackCancel
     if ($decision -eq 'start')  { break }
     if ($decision -eq 'cancel') { return }
     $cfg = Read-Config -Path $ConfigPath -Default @{}
@@ -125,86 +111,7 @@ $env:PYTHONIOENCODING = "utf-8"
 # Build state per plik
 $states = @()
 foreach ($f in $selectedFiles) {
-    $item = Get-Item $f
-    $durs = Get-ShellDurations $item.DirectoryName @($item.Name)
-    $durStr = if ($durs[$item.Name]) { $durs[$item.Name] } else { "" }
-    $states += [PSCustomObject]@{
-        Path        = $f
-        Name        = $item.Name
-        BaseName    = $item.BaseName
-        Duration    = Convert-DurationToSeconds $durStr
-        DurationStr = $durStr
-        Status      = 'Pending'
-        Progress    = 0
-        StartTime   = $null
-        EndTime     = $null
-        LogFile     = Join-Path $logsDir "$($item.BaseName).log"
-        ErrFile     = $null
-        OutDir      = $null
-        Process     = $null
-    }
-}
-
-function Start-WhisperJob {
-    param($State, [string]$OutputDir, [string]$Fp16Val)
-    $fileOutputDir = Join-Path $OutputDir $State.BaseName
-    New-Item -ItemType Directory -Force -Path $fileOutputDir | Out-Null
-    $State.OutDir = $fileOutputDir
-
-    if (Test-Path (Join-Path $fileOutputDir "*.srt")) {
-        $State.Status   = 'Skipped'
-        $State.Progress = 100
-        $State.EndTime  = Get-Date
-        return
-    }
-
-    $errFile = $State.LogFile + ".err"
-    $State.ErrFile = $errFile
-
-    $argList = @(
-        "`"$($State.Path)`""
-        "--language", "Polish"
-        "--model", "medium"
-        "--device", "cuda"
-        "--fp16", $Fp16Val
-        "--output_format", "all"
-        "--output_dir", "`"$fileOutputDir`""
-        "--verbose", "True"
-    )
-
-    try {
-        $proc = Start-Process -FilePath "whisper" `
-            -ArgumentList $argList `
-            -NoNewWindow -PassThru `
-            -RedirectStandardOutput $State.LogFile `
-            -RedirectStandardError $errFile
-    } catch {
-        Set-Content -Path $State.LogFile -Value "BLAD startu whispera: $_" -Encoding UTF8
-        $State.Status = 'Error'
-        $State.EndTime = Get-Date
-        return
-    }
-
-    $State.Process   = $proc
-    $State.Status    = 'Active'
-    $State.StartTime = Get-Date
-}
-
-function Finalize-WhisperJob {
-    param($State)
-    try { $State.Process.WaitForExit(100) | Out-Null } catch {}
-    if ($State.ErrFile -and (Test-Path $State.ErrFile)) {
-        try {
-            $err = Read-FileSafe $State.ErrFile
-            if ($err.Trim()) {
-                Add-Content -Path $State.LogFile -Value "`n--- STDERR ---`n$err" -Encoding UTF8
-            }
-            Remove-Item $State.ErrFile -Force -EA SilentlyContinue
-        } catch {}
-    }
-    $State.EndTime = Get-Date
-    $State.Status  = if ($State.Process -and $State.Process.ExitCode -eq 0) { 'Done' } else { 'Error' }
-    if ($State.Status -eq 'Done') { $State.Progress = 100 }
+    $states += New-WhisperState -Path $f -LogsDir $logsDir
 }
 
 $activeIdx = 0
@@ -235,10 +142,7 @@ try {
         }
 
         if ($cur.Status -eq 'Active') {
-            $secDone = Get-WhisperProgressSec $cur.LogFile
-            if ($cur.Duration -gt 0) {
-                $cur.Progress = [Math]::Min(99, [Math]::Round(100 * $secDone / $cur.Duration))
-            }
+            Update-WhisperProgress $cur
             if ($cur.Process -and $cur.Process.HasExited) {
                 Finalize-WhisperJob $cur
                 $activeIdx++

@@ -89,6 +89,9 @@ fabric.properties
 !.idea/codeStyles
 !.idea/runConfigurations
 
+### Config per-user (lokalne sciezki, sekrety osobno) ###
+*.config.json
+
 ### Workspace (dev environment dla IntelliJ Run) ###
 # Konfiguracje per-user, logi, wyniki transkrypcji generowane lokalnie
 .workspace/*
@@ -101,3 +104,15 @@ fabric.properties
 *.dll
 
 # End of https://www.toptal.com/developers/gitignore/api/intellij+all,powershell
+
+### Transcription Manager runtime (portable) ###
+# Generowane przez instalator — manifest sciezek i portable narzedzia (mogą wazyc GB).
+runtime.json
+runtime/
+
+# Artefakty buildu installera (generowane w CI)
+installer.ps1
+src.zip
+
+# Wiki — osobne repo git
+wiki/

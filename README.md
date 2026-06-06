@@ -1,76 +1,87 @@
 # Transcription Manager
 
-Zestaw narzedzi PowerShell do pracy z transkrypcjami nagran:
+Aplikacja PowerShell do automatycznego tworzenia transkrypcji nagrań i wpinania rozdziałów do plików MKV.
 
-- **Tworzenie transkrypcji** z plikow wideo przez [OpenAI Whisper](https://github.com/openai/whisper)
-- **Dodawanie rozdzialow** do plikow MKV przez [MKVToolNix](https://mkvtoolnix.download/)
+## Co potrafi
 
-Wszystko z interaktywnym TUI: dialogi wyboru folderu Windows, przegladarka plikow ze strzalkami, multi-select, live dashboard postepu.
+- **Generuje transkrypcje** (`.srt`, `.vtt`, `.txt`) z plików wideo używając Whispera
+- **Wpina rozdziały XML** do plików MKV bez ponownego kodowania
 
 ## Instalacja
 
-Otworz PowerShell i wklej:
+Otwórz **PowerShell** i wklej:
 
 ```powershell
-irm https://raw.githubusercontent.com/CrystalPL/Transcryption-manager/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/CrystalPL/Transcription-manager/master/install.ps1 | iex
 ```
 
-Instalator:
-
-1. Pobierze ostatnia wersje aplikacji do `C:\Transkrypcja\`
-2. Sprawdzi zaleznosci (Python, whisper, ffmpeg, MKVToolNix, GPU)
-3. Doinstaluje brakujace przez `winget` / `pip` (po pytaniu)
-4. Doda skrot **Zarzadzanie transkrypcja** do Menu Start
-
-Po instalacji wcisnij klawisz Windows i wpisz `Zarzadzanie` zeby uruchomic.
+Instalator zapyta gdzie zainstalować aplikację (domyślnie `C:\Transkrypcja`), sprawdzi czego brakuje, doinstaluje brakujące programy i doda skrót do menu Start.
 
 ## Wymagania
 
-- Windows 10 / 11
-- PowerShell 5.1+ (jest domyslnie)
-- Python 3.8+ (instalator zainstaluje)
-- Karta NVIDIA z 4GB+ VRAM (opcjonalne, do GPU acceleration whispera)
+- Windows 10 lub 11
+- Połączenie z internetem (do pobrania zależności)
+- Karta NVIDIA z min. 4 GB VRAM (opcjonalnie — bez niej Whisper działa na CPU, ale wolniej)
 
-## Struktura projektu
+Instalator sam zadba o resztę. Aplikacja jest przetestowana z następującymi wersjami:
 
-```
-src/
-├── Manager.ps1              # entry point — menu glowne
-├── lib/                     # wspoldzielone helpery (dot-source'owane)
-│   ├── Ansi.ps1             # kody ANSI, kolory, batched output
-│   ├── Console.ps1          # Show-Header, Ask-TakNie, Fit
-│   ├── Format.ps1           # Format-Size, Format-Time, naturalSort, durations
-│   ├── Dialog.ps1           # Open-FolderDialog, Select-Folder
-│   ├── Config.ps1           # Read-Config, Save-Config
-│   ├── ShellMetadata.ps1    # Get-ShellDurations
-│   ├── Picker.ps1           # Show-Picker — single-select z nawigacja
-│   ├── MultiPicker.ps1      # Show-MultiPicker — multi-select plikow
-│   └── Dashboard.ps1        # Render-Dashboard, View-Logs, progress parser
-└── Scripts/
-    ├── New-Transcription.ps1   # tworzenie transkrypcji whisperem
-    └── Add-Chapters.ps1        # XML rozdzialow -> MKV
-```
+| Składnik | Wersja |
+|---|---|
+| Python | 3.14 |
+| pip | 26.1 |
+| openai-whisper | 20250625 |
+| PyTorch (CUDA 12.6) | 2.12 |
+| ffmpeg | 8.x (build październik 2025) |
+| MKVToolNix | 98.0 |
 
-## Reczna instalacja (jesli nie chcesz uzywac instalatora)
+Instalator pobiera najnowsze dostępne wersje, więc Twoje będą wyższe albo równe — to OK.
+
+## Jak używać
+
+Wciśnij **klawisz Windows** i wpisz **Zarządzanie transkrypcją** → uruchom.
+
+Pojawi się menu z dwiema opcjami:
+
+### 1. Tworzenie transkrypcji
+
+1. Wybierz folder z nagraniami
+2. Zaznacz pliki strzałkami i Spacją (lub `A` żeby wszystkie)
+3. Wybierz folder docelowy
+4. Potwierdź → na ekranie pojawi się dashboard z postępem dla każdego pliku
+
+Możesz wcisnąć numer pliku (1-9) żeby zobaczyć live logi Whispera w trakcie pracy. `Esc` cofa do dashboardu.
+
+Wyniki (`.srt`, `.vtt`, `.txt`, `.json`) trafiają do folderu docelowego, w podfolderze nazwanym jak plik źródłowy.
+
+### 2. Dodawanie rozdziałów do nagrania
+
+1. Wybierz plik MKV/MP4 do którego dodajesz rozdziały
+2. Wybierz plik XML z rozdziałami (format Matroska Chapters)
+3. Aplikacja stworzy nowy plik z dopiskiem `- timeline.mkv`
+4. Opcjonalnie: zastąp oryginał nowym plikiem
+
+Plik XML możesz wygenerować dowolnym narzędziem AI z transkrypcji `.srt` (np. ChatGPT, Claude, Gemini).
+
+## Aktualizacja
+
+Ponowne uruchomienie instalatora podmieni pliki aplikacji, zachowując Twoje konfiguracje i wyniki:
 
 ```powershell
-git clone https://github.com/CrystalPL/Transcryption-manager.git C:\Transkrypcja
-cd C:\Transkrypcja
-.\install.ps1 -SkipDownload
+irm https://raw.githubusercontent.com/CrystalPL/Transcription-manager/master/install.ps1 | iex
 ```
 
-## Konfiguracja
-
-Pliki konfiguracyjne (sciezki ostatnio uzywanych folderow, klucze API) sa zapisywane obok kazdego skryptu jako `*.config.json`. Sa w `.gitignore`, wiec nie sa commitowane.
-
 ## Odinstalowanie
+
+Z folderu instalacji uruchom:
 
 ```powershell
 C:\Transkrypcja\uninstall.ps1
 ```
 
-Usuwa aplikacje, skrot Start Menu i pliki konfiguracyjne. Nie usuwa Whispera, ffmpega ani MKVToolNix (mogłyby byc uzywane przez inne aplikacje).
+(albo z innego folderu jeśli zainstalowałeś gdzie indziej)
 
-## Licencja
+Usuwa aplikację i skrót Start Menu. Nie usuwa Python/ffmpeg/MKVToolNix — mogłyby być używane przez inne programy. Pyta osobno o usunięcie folderów z wynikami transkrypcji i logami.
 
-MIT
+## Pomoc
+
+Coś nie działa? Otwórz [Issue na GitHubie](https://github.com/CrystalPL/Transcription-manager/issues).

@@ -58,3 +58,14 @@ function Fit {
     if ($Text.Length -gt $Length) { return $Text.Substring(0, $Length) }
     return $Text.PadRight($Length)
 }
+
+<#
+.SYNOPSIS Wspolna lista rozszerzen plikow wideo obslugiwanych przez aplikacje.
+.DESCRIPTION Funkcja (nie zmienna) — odporna na scope niezaleznie od sposobu
+uruchomienia skryptu konsumenta. Uzywana przez New-Transcription, Send-FarmJobs,
+Add-Chapters do filtrowania w pickerach.
+#>
+function Get-VideoExtensions {
+    return @('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.m4v',
+             '.mpg', '.mpeg', '.ts', '.mts', '.m2ts', '.webm')
+}

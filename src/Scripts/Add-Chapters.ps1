@@ -1,7 +1,6 @@
 ﻿# Add-Chapters.ps1 -- wlaczanie rozdzialow (XML Matroska) do pliku MKV przez mkvmerge
 
-$VideoExtensions = @('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.m4v',
-                     '.mpg', '.mpeg', '.ts', '.mts', '.m2ts', '.webm')
+$VideoExtensions = Get-VideoExtensions
 
 # Sciezka konfigurowalna przez env var (IntelliJ run config ustawia ja do workspace/)
 $ConfigDir = if ($env:TRANSCRIPTION_CONFIG_DIR) { $env:TRANSCRIPTION_CONFIG_DIR } `

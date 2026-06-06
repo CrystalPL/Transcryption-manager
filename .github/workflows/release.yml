@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (pełna historia dla git describe)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ustal wersję (git describe)
+        id: ver
+        shell: powershell
+        run: |
+          $tags = git tag
+          if ($tags) {
+            $v = (git describe --tags).Trim()
+          } else {
+            $count = (git rev-list --count HEAD).Trim()
+            $sha   = (git rev-parse --short HEAD).Trim()
+            $v = "v0.0.0-$count-g$sha"
+          }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Wersja: $v"
+
+      - name: Spakuj src.zip
+        shell: powershell
+        run: |
+          if (Test-Path src.zip) { Remove-Item src.zip -Force }
+          Compress-Archive -Path src -DestinationPath src.zip -Force
+
+      - name: Zbuduj installer (prerelease, URL wersjonowany)
+        shell: powershell
+        run: |
+          $tag = "${{ steps.ver.outputs.version }}"
+          $url = "https://github.com/${{ github.repository }}/releases/download/$tag/src.zip"
+          .\build\Build-Installer.ps1 -Version $tag -SrcUrl $url -OutFile installer-prerelease.ps1
+
+      - name: Zbuduj installer (latest, URL latest)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        run: |
+          $tag = "${{ steps.ver.outputs.version }}"
+          $url = "https://github.com/${{ github.repository }}/releases/latest/download/src.zip"
+          .\build\Build-Installer.ps1 -Version $tag -SrcUrl $url -OutFile installer-latest.ps1
+
+      - name: Przygotuj assety (kopie pod nazwą installer.ps1)
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path dist-pre -Force | Out-Null
+          Copy-Item installer-prerelease.ps1 dist-pre\installer.ps1 -Force
+          Copy-Item src.zip dist-pre\src.zip -Force
+
+      - name: Przygotuj assety latest
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path dist-latest -Force | Out-Null
+          Copy-Item installer-latest.ps1 dist-latest\installer.ps1 -Force
+          Copy-Item src.zip dist-latest\src.zip -Force
+
+      - name: Utwórz Release prerelease (tag = wersja)
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.ver.outputs.version }}"
+          $ErrorActionPreference = 'SilentlyContinue'
+          gh release view $tag | Out-Null
+          $releaseExists = $LASTEXITCODE -eq 0
+          $ErrorActionPreference = 'Stop'
+          if ($releaseExists) {
+            gh release upload $tag dist-pre\installer.ps1 dist-pre\src.zip --clobber
+            if ($LASTEXITCODE -ne 0) { throw "gh release upload (prerelease) nieudane" }
+          } else {
+            $repo = "${{ github.repository }}"
+            $notesFile = Join-Path $env:RUNNER_TEMP "release-notes.md"
+            @(
+              "Automatyczny build z master (``$tag``).",
+              "",
+              '```powershell',
+              "irm https://github.com/$repo/releases/download/$tag/installer.ps1 | iex",
+              '```'
+            ) | Set-Content $notesFile -Encoding UTF8
+            gh release create $tag dist-pre\installer.ps1 dist-pre\src.zip `
+              --prerelease --title $tag --notes-file $notesFile --target $env:GITHUB_SHA
+            if ($LASTEXITCODE -ne 0) { throw "gh release create (prerelease) nieudane" }
+          }
+
+      - name: Usuń pośrednie release'y i tagi prerelease
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $releases = gh release list --json tagName,isPrerelease --limit 200 | ConvertFrom-Json
+          $toDelete = $releases | Where-Object {
+            $_.isPrerelease -and $_.tagName -match '^v\d+\.\d+\.\d+-\d+-g[0-9a-f]+$'
+          }
+          foreach ($r in $toDelete) {
+            Write-Host "Usuwam release + tag: $($r.tagName)"
+            gh release delete $r.tagName --yes --cleanup-tag
+          }
+
+      - name: Zaktualizuj Release latest (pełny, one-liner)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'SilentlyContinue'
+          gh release view latest | Out-Null
+          $exists = $LASTEXITCODE -eq 0
+          $ErrorActionPreference = 'Stop'
+          if (-not $exists) {
+            gh release create latest dist-latest\installer.ps1 dist-latest\src.zip `
+              --title "latest" --notes "Najnowszy build (one-liner: releases/latest/download/installer.ps1)." --target $env:GITHUB_SHA
+            if ($LASTEXITCODE -ne 0) { throw "gh release create (latest) nieudane" }
+          } else {
+            gh release upload latest dist-latest\installer.ps1 dist-latest\src.zip --clobber
+            if ($LASTEXITCODE -ne 0) { throw "gh release upload (latest) nieudane" }
+            gh release edit latest --target $env:GITHUB_SHA
+            if ($LASTEXITCODE -ne 0) { throw "gh release edit (latest) nieudane" }
+            git tag -f latest $env:GITHUB_SHA
+            git push --force origin latest
+            if ($LASTEXITCODE -ne 0) { throw "git push --force latest nieudane" }
+          }

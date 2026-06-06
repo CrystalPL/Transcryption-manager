@@ -56,17 +56,6 @@ function Get-AnsiBg {
 }
 
 <#
-.SYNOPSIS Buduje string z pozycjonowaniem kursora + kolorami + tekstem + resetem.
-.PARAMETER Row 0-based numer wiersza
-#>
-function Build-Row {
-    param([int]$Row, [string]$Text, [string]$Fg, [string]$Bg = 'Black')
-    $fgC = Get-AnsiFg $Fg
-    $bgC = Get-AnsiBg $Bg
-    return "$script:ESC[$($Row + 1);1H$script:ESC[$fgC;${bgC}m$Text$script:ESC[0m"
-}
-
-<#
 .SYNOPSIS Owija tekst w sekwencje ANSI kolorow (bez pozycjonowania).
 #>
 function Wrap-Ansi {
