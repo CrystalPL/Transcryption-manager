@@ -4,12 +4,6 @@
     Write-Host "`n  $Q $opt " -NoNewline -ForegroundColor Yellow
     while ($true) {
         $k = [Console]::ReadKey($true)
-        if ($k.Key -eq 'Enter') {
-            $lbl = if ($Default) { "Tak" } else { "Nie" }
-            $col = if ($Default) { 'Green' } else { 'Red' }
-            Write-Host $lbl -ForegroundColor $col
-            return $Default
-        }
         $c = [char]::ToLower($k.KeyChar)
         if ($c -eq 't' -or $c -eq 'y') { Write-Host "Tak" -ForegroundColor Green; return $true }
         if ($c -eq 'n')                 { Write-Host "Nie" -ForegroundColor Red;   return $false }

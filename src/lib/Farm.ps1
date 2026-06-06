@@ -191,6 +191,7 @@ function Invoke-FarmReclaim {
         try {
             Move-Item -Path $f.FullName -Destination $dest -EA Stop
             if (Test-Path $hb) { Remove-Item $hb -Force -EA SilentlyContinue }
+            Write-FarmLog $QueuePath "Reclaim: $($f.Name) (zombie >${script:FarmHeartbeatTimeoutSec}s)"
             $reclaimed++
         } catch {
             # Ktos inny wlasnie pracuje/przenosi -- pomijamy.
@@ -211,6 +212,18 @@ function Get-FarmCounts {
         Done    = @(Get-ChildItem -Path $p.Done    -Filter "job-*.json" -File -EA SilentlyContinue).Count
         Failed  = @(Get-ChildItem -Path $p.Failed  -Filter "job-*.json" -File -EA SilentlyContinue).Count
     }
+}
+
+<#
+.SYNOPSIS Zapisuje zdarzenie do farm.log w folderze kolejki (append, UTF-8).
+.PARAMETER QueuePath Sciezka kolejki
+.PARAMETER Message Tresc zdarzenia
+#>
+function Write-FarmLog {
+    param([string]$QueuePath, [string]$Message)
+    $logPath = Join-Path $QueuePath "farm.log"
+    $line    = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [$($env:COMPUTERNAME)] $Message"
+    try { Add-Content -Path $logPath -Value $line -Encoding UTF8 -EA Stop } catch {}
 }
 
 <#

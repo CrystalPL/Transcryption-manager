@@ -89,26 +89,32 @@ function Format-DownloadSize([long]$bytes) {
 function Invoke-ParallelDownloads {
     param([array]$Tasks)  # @{Label; Url; Dest}
 
-    $progress = @{}
-    $clients  = @()
+    if ($Tasks.Count -eq 0) { return }
 
+    # HEAD requests zeby poznac rozmiary plikow przed pobieraniem
+    $totals = @{}
     foreach ($t in $Tasks) {
-        $progress[$t.Label] = @{ Pct = 0; Downloaded = 0L; Total = 0L; Done = $false }
+        try {
+            $req = [System.Net.WebRequest]::Create($t.Url)
+            $req.Method  = 'HEAD'
+            $req.Timeout = 8000
+            $resp = $req.GetResponse()
+            $totals[$t.Label] = $resp.ContentLength
+            $resp.Close()
+        } catch {
+            $totals[$t.Label] = 0L
+        }
     }
 
+    # Start-Job na kazdy plik — osobny PS runspace, bez problemu z wątkami
+    $jobInfos = @()
     foreach ($t in $Tasks) {
-        $capturedLabel    = $t.Label
-        $capturedProgress = $progress
-        $handler = {
-            param($s, $e)
-            $capturedProgress[$capturedLabel].Pct        = $e.ProgressPercentage
-            $capturedProgress[$capturedLabel].Downloaded = $e.BytesReceived
-            $capturedProgress[$capturedLabel].Total      = $e.TotalBytesToReceive
-        }.GetNewClosure()
-        $wc = New-Object System.Net.WebClient
-        $wc.Add_DownloadProgressChanged([System.Net.DownloadProgressChangedEventHandler]$handler)
-        $wc.DownloadFileAsync([Uri]$t.Url, $t.Dest)
-        $clients += $wc
+        $job = Start-Job -ScriptBlock {
+            param($url, $dest)
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            (New-Object System.Net.WebClient).DownloadFile($url, $dest)
+        } -ArgumentList $t.Url, $t.Dest
+        $jobInfos += @{ Label = $t.Label; Job = $job; Dest = $t.Dest }
     }
 
     $startTime = Get-Date
@@ -116,39 +122,50 @@ function Invoke-ParallelDownloads {
     $startRow  = [Console]::CursorTop
     for ($i = 0; $i -le $Tasks.Count; $i++) { Write-Host "" }
 
-    while ($clients | Where-Object { $_.IsBusy }) {
+    while ($jobInfos | Where-Object { $_.Job.State -eq 'Running' }) {
         $elapsed    = [int]((Get-Date) - $startTime).TotalSeconds
         $elapsedStr = "{0}:{1:D2}" -f [int]($elapsed / 60), ($elapsed % 60)
 
         [Console]::SetCursorPosition(0, $startRow)
-        foreach ($t in $Tasks) {
-            $p      = $progress[$t.Label]
-            $pct    = $p.Pct
+        foreach ($info in $jobInfos) {
+            $dl     = if (Test-Path $info.Dest) { (Get-Item $info.Dest).Length } else { 0L }
+            $tot    = $totals[$info.Label]
+            $pct    = if ($tot -gt 0) { [int]($dl * 100 / $tot) } else { 0 }
             $filled = [Math]::Min(20, [int]($pct / 5))
             $bar    = "[" + ("=" * $filled) + (" " * (20 - $filled)) + "]"
-            $dl     = Format-DownloadSize $p.Downloaded
-            $tot    = if ($p.Total -gt 0) { Format-DownloadSize $p.Total } else { "??" }
-            $line   = "  {0,-12} {1} {2,3}%  {3,8} / {4}" -f $t.Label, $bar, $pct, $dl, $tot
-            Write-Host $line.PadRight($w - 1) -ForegroundColor White
+            $dlStr  = Format-DownloadSize $dl
+            $totStr = if ($tot -gt 0) { Format-DownloadSize $tot } else { "??" }
+            $color  = if ($info.Job.State -ne 'Running') { 'Green' } else { 'White' }
+            $line   = "  {0,-12} {1} {2,3}%  {3,8} / {4}" -f $info.Label, $bar, $pct, $dlStr, $totStr
+            Write-Host $line.PadRight($w - 1) -ForegroundColor $color
         }
         Write-Host ("  Czas: $elapsedStr").PadRight($w - 1) -ForegroundColor DarkGray
 
-        Start-Sleep -Milliseconds 250
+        Start-Sleep -Milliseconds 300
     }
 
-    # Finalny render po zakonczeniu
+    # Finalny render
     $elapsed    = [int]((Get-Date) - $startTime).TotalSeconds
     $elapsedStr = "{0}:{1:D2}" -f [int]($elapsed / 60), ($elapsed % 60)
     [Console]::SetCursorPosition(0, $startRow)
-    foreach ($t in $Tasks) {
-        $p    = $progress[$t.Label]
-        $tot  = Format-DownloadSize $p.Total
-        $line = "  {0,-12} [====================] 100%  {1,8}" -f $t.Label, $tot
+    foreach ($info in $jobInfos) {
+        $tot    = $totals[$info.Label]
+        $dl     = if (Test-Path $info.Dest) { (Get-Item $info.Dest).Length } else { $tot }
+        $totStr = Format-DownloadSize ([Math]::Max($tot, $dl))
+        $line   = "  {0,-12} [====================] 100%  {1,8}" -f $info.Label, $totStr
         Write-Host $line.PadRight($w - 1) -ForegroundColor Green
     }
     Write-Host ("  Czas: $elapsedStr").PadRight($w - 1) -ForegroundColor DarkGray
 
-    $clients | ForEach-Object { $_.Dispose() }
+    # Sprawdz bledy i posprzataj
+    foreach ($info in $jobInfos) {
+        $null = Receive-Job -Job $info.Job -ErrorAction SilentlyContinue
+        if ($info.Job.State -eq 'Failed') {
+            $err = $info.Job.ChildJobs[0].JobStateInfo.Reason.Message
+            Write-Host "  [FAIL] $($info.Label): $err" -ForegroundColor Red
+        }
+        Remove-Job -Job $info.Job -Force
+    }
 }
 
 function Invoke-Dependencies {

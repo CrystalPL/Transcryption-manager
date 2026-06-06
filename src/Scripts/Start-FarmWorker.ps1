@@ -55,6 +55,7 @@ New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
 $lastHb = [datetime]::MinValue
 $running = $true
 
+Write-FarmLog $queuePath "Worker start"
 try {
     [Console]::CursorVisible = $false
     Clear-Host
@@ -103,6 +104,8 @@ try {
         Update-FarmHeartbeat -QueuePath $queuePath -JobId $job.id
         Update-FarmWorkerStatus -QueuePath $queuePath -CurrentFile $state.Name -Progress 0 -Status "working"
 
+        Write-FarmLog $queuePath "Claim: $($job.id) ($($state.Name))"
+
         if (-not (Test-Path $state.Path)) {
             # Plik zrodlowy zniknal -> failed z opisem.
             $state.Status = 'Error'
@@ -111,6 +114,7 @@ try {
             Set-Content -Path ($failDest + ".error") -Value "Plik zrodlowy niedostepny: $($state.Path)" -Encoding UTF8 -EA SilentlyContinue
             $hb = Join-Path $p.Claimed "job-$($job.id).heartbeat"
             if (Test-Path $hb) { Remove-Item $hb -Force -EA SilentlyContinue }
+            Write-FarmLog $queuePath "Error: $($job.id) - source missing: $($state.Path)"
             continue
         }
 
@@ -160,6 +164,7 @@ try {
                         try { Move-Item -Path $job.ClaimedPath -Destination (Join-Path $p.Todo "job-$($job.id).json") -Force -EA Stop } catch {}
                         $hb = Join-Path $p.Claimed "job-$($job.id).heartbeat"
                         if (Test-Path $hb) { Remove-Item $hb -Force -EA SilentlyContinue }
+                        Write-FarmLog $queuePath "Returned: $($job.id) ($($state.Name)) - user interrupt"
                         $running = $false
                         break
                     }
@@ -173,12 +178,14 @@ try {
         $hb = Join-Path $p.Claimed "job-$($job.id).heartbeat"
         if ($state.Status -eq 'Done' -or $state.Status -eq 'Skipped') {
             try { Move-Item -Path $job.ClaimedPath -Destination (Join-Path $p.Done "job-$($job.id).json") -Force -EA Stop } catch {}
+            Write-FarmLog $queuePath "Done: $($job.id) ($($state.Name))"
         } else {
             $failDest = Join-Path $p.Failed "job-$($job.id).json"
             try { Move-Item -Path $job.ClaimedPath -Destination $failDest -Force -EA Stop } catch {}
             $errTail = Read-FileSafe $state.LogFile
             if ($errTail.Length -gt 4000) { $errTail = $errTail.Substring($errTail.Length - 4000) }
             Set-Content -Path ($failDest + ".error") -Value $errTail -Encoding UTF8 -EA SilentlyContinue
+            Write-FarmLog $queuePath "Failed: $($job.id) ($($state.Name)) exitcode=$($state.ExitCode)"
         }
         if (Test-Path $hb) { Remove-Item $hb -Force -EA SilentlyContinue }
     }
@@ -186,6 +193,7 @@ try {
     [Console]::CursorVisible = $true
     Update-FarmWorkerStatus -QueuePath $queuePath -Status "stopped"
     if ($state -and $state.Process -and -not $state.Process.HasExited) { try { $state.Process.Kill() } catch {} }
+    Write-FarmLog $queuePath "Worker stop"
 }
 
 Clear-Host

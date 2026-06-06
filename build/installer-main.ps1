@@ -47,6 +47,9 @@ try {
 } catch [OperationCanceledException] {
     Remove-Item $srcZip -Force -EA SilentlyContinue
     Remove-Item $srcDir -Recurse -Force -EA SilentlyContinue
+} catch {
+    Write-Host "`n  BLAD INSTALACJI: $_" -ForegroundColor Red
+    Write-Host "  Szczegoly w logu: $logFile" -ForegroundColor DarkGray
 }
 
 $null = Stop-Transcript -ErrorAction SilentlyContinue
