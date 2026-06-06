@@ -17,19 +17,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Ustal wersję (git describe)
+      - name: Ustal wersję
         id: ver
         shell: powershell
         run: |
-          $ErrorActionPreference = 'Continue'
-          $v = git describe --tags 2>&1 | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }
-          $ErrorActionPreference = 'Stop'
-          if ($LASTEXITCODE -ne 0) {
-            $count = (git rev-list --count HEAD).Trim()
-            $sha   = (git rev-parse --short HEAD).Trim()
-            $v = "v0.0.0-$count-g$sha"
+          $latestTag = git tag -l |
+            Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
+            Sort-Object { [version]($_ -replace '^v','') } -Descending |
+            Select-Object -First 1
+          if ($latestTag) {
+            $since = [int](git rev-list --count "$latestTag..HEAD").Trim()
+            $v = if ($since -eq 0) { $latestTag } else { "$latestTag-prerelease-$since" }
           } else {
-            $v = $v.Trim()
+            $count = (git rev-list --count HEAD).Trim()
+            $v = "v0.0.0-prerelease-$count"
           }
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Wersja: $v"
@@ -106,7 +107,7 @@ jobs:
         run: |
           $releases = gh release list --json tagName,isPrerelease --limit 200 | ConvertFrom-Json
           $toDelete = $releases | Where-Object {
-            $_.isPrerelease -and $_.tagName -match '^v\d+\.\d+\.\d+-\d+-g[0-9a-f]+$'
+            $_.isPrerelease -and $_.tagName -match '^v\d+\.\d+\.\d+-prerelease-\d+$'
           }
           foreach ($r in $toDelete) {
             Write-Host "Usuwam release + tag: $($r.tagName)"
