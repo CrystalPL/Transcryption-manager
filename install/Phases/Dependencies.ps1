@@ -120,7 +120,11 @@ function Render-ProgressRow {
         'pip' {
             $label   = "pip install"
             $elapsed = if ($St.StartedAt) { [int]((Get-Date) - $St.StartedAt).TotalSeconds } else { 0 }
-            $info    = if ($St.StartedAt) { " $($elapsed)s" } else { " ~10-20 min" }
+            $min     = [int]($elapsed / 60)
+            $sec     = $elapsed % 60
+            $timeStr = if ($St.StartedAt) { if ($min -gt 0) { " ${min}m ${sec}s" } else { " ${sec}s" } } else { " ~10-20 min" }
+            $pipLine = if ($St.LastLine) { "  $($St.LastLine)" } else { "" }
+            $info    = $timeStr + $pipLine
             $color   = 'Yellow'
         }
         'ok' {
@@ -137,8 +141,9 @@ function Render-ProgressRow {
         }
     }
 
-    $line = "  {0,-10} {1,-12} {2}{3}" -f $Name, $label, $bar, $info
-    Write-Host $line.PadRight($W - 1) -ForegroundColor $color -NoNewline
+    $line     = "  {0,-10} {1,-12} {2}{3}" -f $Name, $label, $bar, $info
+    $rendered = if ($line.Length -gt $W - 1) { $line.Substring(0, $W - 1) } else { $line.PadRight($W - 1) }
+    Write-Host $rendered -ForegroundColor $color -NoNewline
     Write-Host ""
 }
 
@@ -579,15 +584,27 @@ function Invoke-Dependencies {
                 } -ArgumentList $captPy, $captLog, $captArgs
 
                 while ($pipJob.State -eq 'Running') {
+                    try {
+                        $fs  = [System.IO.File]::Open($pipLog, 'Open', 'Read', 'ReadWrite')
+                        $sr  = New-Object System.IO.StreamReader($fs)
+                        $raw = $sr.ReadToEnd()
+                        $sr.Close(); $fs.Close()
+                        $idx = $raw.LastIndexOf('--- whisper pip')
+                        $pip = if ($idx -ge 0) { $raw.Substring($idx) } else { '' }
+                        $ll  = ($pip -split "`n" | Where-Object { $_.Trim() -ne '' -and -not $_.TrimStart().StartsWith('---') } | Select-Object -Last 1)
+                        if ($ll) { $st[$name].LastLine = $ll.Trim() }
+                    } catch {}
+
                     [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
                     Render-ProgressRow $name $st[$name] $w
                     [Console]::SetCursorPosition(0, $afterRow)
-                    Start-Sleep -Milliseconds 500
+                    Start-Sleep -Milliseconds 300
                 }
 
-                $jobResult = Receive-Job $pipJob -ErrorAction SilentlyContinue
+                $jobResult = @(Receive-Job $pipJob -ErrorAction SilentlyContinue)
                 Remove-Job $pipJob -Force
-                $ec = if ($jobResult -is [int]) { $jobResult } else { 1 }
+                $rawEc = $jobResult | Where-Object { $_ -is [int] } | Select-Object -Last 1
+                $ec = if ($null -eq $rawEc) { 1 } else { [int]$rawEc }
 
                 $scriptsDir = Join-Path (Split-Path $pyExe -Parent) "Scripts"
                 $whisperExe = Join-Path $scriptsDir "whisper.exe"

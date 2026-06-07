@@ -2,7 +2,7 @@
 .SYNOPSIS Zwraca root instalacji (src/lib -> src -> root).
 #>
 function Get-RuntimeRoot {
-    return (Split-Path $PSCommandPath -Parent | Split-Path -Parent | Split-Path -Parent)
+    return (Split-Path $PSCommandPath -Parent | Split-Path -Parent)
 }
 
 <#
