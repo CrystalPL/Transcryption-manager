@@ -5,6 +5,13 @@
         $this.SupportsPortable = $true
     }
 
+    [bool] Test() {
+        $cmd = Get-Command $this.Command -ErrorAction SilentlyContinue
+        if (-not $cmd) { return $false }
+        if ($cmd.Source -like "*\Microsoft\WindowsApps\*") { return $false }
+        return $true
+    }
+
     [string] LatestPackageId() {
         $found = (winget search "Python.Python.3" --source winget 2>$null |
             Select-String -Pattern 'Python\.Python\.3\.(\d+)').Matches |

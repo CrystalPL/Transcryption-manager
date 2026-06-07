@@ -148,6 +148,13 @@ function Render-ProgressRow {
     Write-Host ""
 }
 
+function Test-RealPython {
+    $cmd = Get-Command "python" -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $false }
+    if ($cmd.Source -like "*\Microsoft\WindowsApps\*") { return $false }
+    return $true
+}
+
 function Test-AllDepsPresent([string]$InstallDir) {
     $RuntimeDir = Join-Path $InstallDir "runtime"
     $portableExes = @{
@@ -158,7 +165,10 @@ function Test-AllDepsPresent([string]$InstallDir) {
     }
     $deps = @([PythonDependency]::new(), [FfmpegDependency]::new(), [MkvmergeDependency]::new(), [WhisperDependency]::new())
     foreach ($d in $deps) {
-        if (-not ($d.Test() -or (Test-Path $portableExes[$d.Name]))) { return $false }
+        $present = (Test-Path $portableExes[$d.Name])
+        if (-not $present -and $d.Name -ne 'Python') { $present = $d.Test() }
+        if (-not $present -and $d.Name -eq 'Python') { $present = Test-RealPython }
+        if (-not $present) { return $false }
     }
     return $true
 }
@@ -570,7 +580,9 @@ function Invoke-Dependencies {
         $portablePy = Test-Path $pyExe
         if (-not $portablePy) {
             $pyCmd = Get-Command "python" -ErrorAction SilentlyContinue
-            if ($pyCmd) { $pyExe = $pyCmd.Source }
+            if ($pyCmd -and $pyCmd.Source -notlike "*\Microsoft\WindowsApps\*") {
+                $pyExe = $pyCmd.Source
+            }
         }
 
         if (-not (Test-Path $pyExe)) {
