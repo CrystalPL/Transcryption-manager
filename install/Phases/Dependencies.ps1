@@ -520,10 +520,12 @@ function Invoke-Dependencies {
             }
             if (-not (Test-Path $LogDir)) { $LogDir = $env:TEMP }
             $pipLog    = Join-Path $LogDir "pip-whisper.log"
-            $pipLogErr = Join-Path $LogDir "pip-whisper.err"
             $savedHome = $env:PYTHONHOME; $savedPath = $env:PYTHONPATH
             $env:PYTHONHOME       = $null; $env:PYTHONPATH = $null
             $env:PYTHONUNBUFFERED = '1';   $env:PYTHONIOENCODING = 'utf-8'
+
+            Add-Content -Path $pipLog -Value "`n=== $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) ===" -Encoding UTF8 -ErrorAction SilentlyContinue
+            Add-Content -Path $pipLog -Value "Python: $pyExe" -Encoding UTF8 -ErrorAction SilentlyContinue
 
             $setupOut = "$pipLog.setup"; $setupErr = "$pipLog.setup.err"
             $setupProc = Start-Process -FilePath $pyExe `
@@ -531,6 +533,8 @@ function Invoke-Dependencies {
                 -RedirectStandardOutput $setupOut -RedirectStandardError $setupErr `
                 -NoNewWindow -PassThru
             $setupProc.WaitForExit()
+            $env:PYTHONHOME = $savedHome; $env:PYTHONPATH = $savedPath
+            Add-Content -Path $pipLog -Value "setuptools exit=$($setupProc.ExitCode)" -Encoding UTF8 -ErrorAction SilentlyContinue
             foreach ($tf in @($setupOut, $setupErr)) {
                 if (Test-Path $tf) {
                     $tc = Get-Content $tf -Raw -ErrorAction SilentlyContinue
@@ -540,50 +544,56 @@ function Invoke-Dependencies {
             }
 
             if ($setupProc.ExitCode -ne 0) {
-                $env:PYTHONHOME = $savedHome; $env:PYTHONPATH = $savedPath
                 $st[$name].Phase = 'err'
             } else {
-                $pipLogTmp = "$pipLog.tmp"
-                $pipArgs   = @('-m', 'pip', 'install', '--upgrade', '--no-build-isolation', 'openai-whisper', '--no-warn-script-location', '-v')
-                Add-Content -Path $pipLog -Value "`n--- whisper pip ---`n$pyExe $($pipArgs -join ' ')" -Encoding UTF8 -ErrorAction SilentlyContinue
+                $installArgs = @('-m', 'pip', 'install', '--upgrade', '--no-build-isolation', 'openai-whisper', '--no-warn-script-location')
+                Add-Content -Path $pipLog -Value "`n--- whisper pip: $($installArgs -join ' ') ---" -Encoding UTF8 -ErrorAction SilentlyContinue
 
-                $proc = $null
-                try {
-                    $proc = Start-Process -FilePath $pyExe -ArgumentList $pipArgs `
-                        -RedirectStandardOutput $pipLogTmp `
-                        -RedirectStandardError  $pipLogErr `
-                        -NoNewWindow -PassThru -ErrorAction Stop
-                } catch {
-                    Add-Content -Path $pipLog -Value "BLAD Start-Process: $_" -Encoding UTF8 -ErrorAction SilentlyContinue
-                }
+                $captPy   = $pyExe
+                $captLog  = $pipLog
+                $captArgs = $installArgs
+                $pipJob = Start-Job -ScriptBlock {
+                    param($py, $log, $installArgs)
+                    $env:PYTHONHOME      = $null
+                    $env:PYTHONPATH      = $null
+                    $env:PYTHONUNBUFFERED = '1'
+                    $env:PYTHONIOENCODING = 'utf-8'
+                    try {
+                        $pyVer  = & $py --version 2>&1
+                        $pipVer = & $py -m pip --version 2>&1
+                        Add-Content -Path $log -Value "python: $pyVer" -Encoding UTF8 -ErrorAction SilentlyContinue
+                        Add-Content -Path $log -Value "pip: $pipVer" -Encoding UTF8 -ErrorAction SilentlyContinue
+                        Add-Content -Path $log -Value "start: $((Get-Date).ToString('HH:mm:ss'))" -Encoding UTF8 -ErrorAction SilentlyContinue
 
-                $env:PYTHONHOME = $savedHome; $env:PYTHONPATH = $savedPath
+                        & $py @installArgs 2>&1 | ForEach-Object {
+                            Add-Content -Path $log -Value "$_" -Encoding UTF8 -ErrorAction SilentlyContinue
+                        }
 
-                if ($proc) {
-                    while (-not $proc.HasExited) {
-                        [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
-                        Render-ProgressRow $name $st[$name] $w
-                        [Console]::SetCursorPosition(0, $afterRow)
-                        Start-Sleep -Milliseconds 500
+                        $ec = if ($null -eq $LASTEXITCODE) { 1 } else { $LASTEXITCODE }
+                        Add-Content -Path $log -Value "end: $((Get-Date).ToString('HH:mm:ss'))  exit=$ec" -Encoding UTF8 -ErrorAction SilentlyContinue
+                        return $ec
+                    } catch {
+                        Add-Content -Path $log -Value "EXCEPTION: $_" -Encoding UTF8 -ErrorAction SilentlyContinue
+                        return 1
                     }
-                    Add-Content -Path $pipLog -Value "EXIT CODE: $($proc.ExitCode)" -Encoding UTF8 -ErrorAction SilentlyContinue
-                } else {
-                    Add-Content -Path $pipLog -Value "START-PROCESS nie zwrocil procesu" -Encoding UTF8 -ErrorAction SilentlyContinue
+                } -ArgumentList $captPy, $captLog, $captArgs
+
+                while ($pipJob.State -eq 'Running') {
+                    [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
+                    Render-ProgressRow $name $st[$name] $w
+                    [Console]::SetCursorPosition(0, $afterRow)
+                    Start-Sleep -Milliseconds 500
                 }
 
-                foreach ($tf in @($pipLogTmp, $pipLogErr)) {
-                    if (Test-Path $tf) {
-                        $tc = Get-Content $tf -Raw -ErrorAction SilentlyContinue
-                        if ($tc) { Add-Content -Path $pipLog -Value $tc -Encoding UTF8 -ErrorAction SilentlyContinue }
-                        else     { Add-Content -Path $pipLog -Value "(brak output: $(Split-Path $tf -Leaf))" -Encoding UTF8 -ErrorAction SilentlyContinue }
-                        Remove-Item $tf -Force -ErrorAction SilentlyContinue
-                    } else {
-                        Add-Content -Path $pipLog -Value "(plik nie powstal: $(Split-Path $tf -Leaf))" -Encoding UTF8 -ErrorAction SilentlyContinue
-                    }
-                }
+                $jobResult = Receive-Job $pipJob -ErrorAction SilentlyContinue
+                Remove-Job $pipJob -Force
+                $ec = if ($jobResult -is [int]) { $jobResult } else { 1 }
 
                 $scriptsDir = Join-Path (Split-Path $pyExe -Parent) "Scripts"
-                $whisperOk  = ($proc -ne $null) -and ($proc.ExitCode -eq 0) -and (Test-Path (Join-Path $scriptsDir "whisper.exe"))
+                $whisperExe = Join-Path $scriptsDir "whisper.exe"
+                Add-Content -Path $pipLog -Value "whisper.exe: $(if (Test-Path $whisperExe) { 'OK' } else { 'brak' })" -Encoding UTF8 -ErrorAction SilentlyContinue
+
+                $whisperOk  = ($ec -eq 0) -and (Test-Path $whisperExe)
                 $st[$name].Phase = if ($whisperOk) { 'ok' } else { 'err' }
             }
         }
@@ -592,8 +602,16 @@ function Invoke-Dependencies {
         Render-ProgressRow $name $st[$name] $w
         [Console]::SetCursorPosition(0, $afterRow)
 
-        if ($st[$name].Phase -eq 'err' -and (Test-Path $pipLog)) {
+        if ($null -ne $pipLog -and (Test-Path $pipLog)) {
             Write-Host "    Log pip: $pipLog" -ForegroundColor DarkGray
+        }
+
+        if ($st[$name].Phase -eq 'err' -and $null -ne $pipLog -and (Test-Path $pipLog)) {
+            $tail = Get-Content $pipLog -Tail 20 -ErrorAction SilentlyContinue
+            if ($tail) {
+                Write-Host ""
+                foreach ($line in $tail) { Write-Host "    $line" -ForegroundColor DarkGray }
+            }
         }
 
         if ($st[$name].Phase -eq 'ok') {
