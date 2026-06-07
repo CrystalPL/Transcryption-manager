@@ -236,7 +236,16 @@ function Invoke-Dependencies {
 
     Write-Step "[3/$Total] Sprawdzanie zaleznosci..."
     foreach ($d in $deps) {
-        if ($d.Test() -or $portablePresent[$d.Name]) { Write-OK $d.Name } else { Write-Missing $d.Name }
+        $onPath   = $d.Test()
+        $portable = $portablePresent[$d.Name]
+        if ($onPath -or $portable) {
+            $src = if ($portable -and $onPath) { 'portable + systemowy' }
+                   elseif ($portable)          { 'portable' }
+                   else                        { 'systemowy' }
+            Write-OK ("{0,-9}({1})" -f $d.Name, $src)
+        } else {
+            Write-Missing $d.Name
+        }
     }
 
     if (Test-Command "nvidia-smi") {
@@ -617,14 +626,15 @@ function Invoke-Dependencies {
         }
 
         $venvDir   = Join-Path $RuntimeDir "whisper-env"
-        $installPy = $pyExe
+        $installPy = if ($portablePy) { $pyExe } else { $null }
         if (-not $portablePy -and (Test-Path $pyExe)) {
+            if (Test-Path $venvDir) { Remove-Item $venvDir -Recurse -Force -ErrorAction SilentlyContinue }
             & $pyExe -m venv $venvDir 2>&1 | Out-Null
             $venvPy = Join-Path $venvDir "Scripts\python.exe"
             if (Test-Path $venvPy) { $installPy = $venvPy }
         }
 
-        if (-not (Test-Path $installPy)) {
+        if (-not $installPy -or -not (Test-Path $installPy)) {
             $st[$name].Phase = 'err'
         } else {
             $st[$name].Phase = 'pip'
