@@ -1,6 +1,4 @@
-﻿# Dialog.ps1 -- dialogi systemowe Windows
-
-Add-Type -AssemblyName System.Windows.Forms
+﻿Add-Type -AssemblyName System.Windows.Forms
 
 <#
 .SYNOPSIS Otwiera natywne okno wyboru folderu Windows.
@@ -17,7 +15,6 @@ function Open-FolderDialog {
     $dlg.ShowNewFolderButton = $true
     $dlg.SelectedPath        = if ($StartPath -and (Test-Path $StartPath)) { $StartPath } else { $HOME }
 
-    # Wymus okno na wierzchu
     $owner = New-Object System.Windows.Forms.Form
     $owner.TopMost      = $true
     $owner.Visible      = $false

@@ -1,8 +1,4 @@
-﻿# Watch-Farm.ps1 -- monitor farmy: liczniki kolejki + tabela workerow + reclaim.
-# Na starcie pyta o uruchomienie lokalnego workera (jako osobny proces).
-# Reuse: Farm.ps1, Console.ps1, Ansi.ps1.
-
-$ScriptDir   = Split-Path $PSCommandPath -Parent
+﻿$ScriptDir   = Split-Path $PSCommandPath -Parent
 $ProjectRoot = Split-Path $ScriptDir -Parent
 $ConfigDir   = if ($env:TRANSCRIPTION_CONFIG_DIR) { $env:TRANSCRIPTION_CONFIG_DIR } else { $ProjectRoot }
 $ConfigPath  = Join-Path $ConfigDir "Farm.config.json"
@@ -22,13 +18,8 @@ if (-not (Initialize-FarmQueue $queuePath)) {
     return
 }
 
-# Decyzja "wybor przy uruchomieniu": czy ta maszyna tez pracuje (osobny proces workera).
 Show-Header -Title "Farma: monitor" -Subtitle "Konfiguracja"
 if (Ask-TakNie "Uruchomic tez workera na tym komputerze?" $false) {
-    # Worker w osobnym oknie: dziedziczy env, ma wlasny dashboard. Komunikacja
-    # z monitorem tylko przez workers\<maszyna>.json (zero wspoldzielonego stanu).
-    # Manager nie ma trybu "tylko worker", wiec bootstrap inline: laduje lib i
-    # odpala Start-FarmWorker.ps1.
     $env:TRANSCRIPTION_FARM_DIR = $queuePath
     $boot = "Set-Location '$ProjectRoot'; " +
             ". (Join-Path 'lib' 'LoadOrder.ps1'); " +

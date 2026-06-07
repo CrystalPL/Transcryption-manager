@@ -1,7 +1,4 @@
-﻿# Dashboard.ps1 -- live dashboard postepu transkrypcji + viewer logow
-# Wymaga: Ansi.ps1, Console.ps1, Format.ps1, ShellMetadata.ps1
-
-<#
+﻿<#
 .SYNOPSIS Parsuje ostatni timestamp [start --> end] z logu whispera, zwraca sekundy.
 #>
 function Get-WhisperProgressSec {
@@ -51,7 +48,6 @@ function Render-Dashboard {
         $pct     = $cur.Progress
         $eta     = if ($pct -gt 0 -and $pct -lt 100) { [int](($elapsed * (100 - $pct)) / $pct) } else { 0 }
 
-        # Suffix najpierw, potem pasek dostaje reszte miejsca
         $suffix = " {0,3}%   uplynelo {1}   pozostalo ~{2}" -f $pct, (Format-Time $elapsed), (Format-Time $eta)
         $barW   = [Math]::Max(15, $w - $suffix.Length - 6)
         $bar    = Build-ProgressBar $pct $barW

@@ -1,13 +1,9 @@
-﻿# Add-Chapters.ps1 -- wlaczanie rozdzialow (XML Matroska) do pliku MKV przez mkvmerge
+﻿$VideoExtensions = Get-VideoExtensions
 
-$VideoExtensions = Get-VideoExtensions
-
-# Sciezka konfigurowalna przez env var (IntelliJ run config ustawia ja do workspace/)
 $ConfigDir = if ($env:TRANSCRIPTION_CONFIG_DIR) { $env:TRANSCRIPTION_CONFIG_DIR } `
              else { Split-Path $PSCommandPath -Parent | Split-Path -Parent }
 $ConfigPath = Join-Path $ConfigDir "Add-Chapters.config.json"
 
-# Sprawdz mkvmerge — Get-Command sprawdza tylko czy w PATH, nie odpala procesu
 function Test-Mkvmerge {
     return $null -ne (Get-Command mkvmerge -ErrorAction SilentlyContinue)
 }
@@ -22,7 +18,6 @@ if (-not (Test-Mkvmerge)) {
 
 $cfg = Read-Config -Path $ConfigPath -Default @{ lastVideoDir = ""; lastXmlDir = "" }
 
-# KROK 1: folder wideo
 Show-Header -Title "Dodawanie rozdzialow" -Krok "[1/2]" -Subtitle "Wybierz folder z filmem"
 $videoDir = Select-Folder "Wskaz folder z filmem wideo" $cfg.lastVideoDir ([Environment]::GetFolderPath("MyVideos"))
 if (-not $videoDir) { return }
@@ -36,7 +31,6 @@ $videoFile = Show-Picker `
     -ExtensionsLabel "mkv, mp4, avi, mov, wmv, ts, mts..."
 if (-not $videoFile) { return }
 
-# KROK 2: plik XML
 Show-Header -Title "Dodawanie rozdzialow" -Krok "[2/2]" -Subtitle "Wybierz folder z plikami XML rozdzialow"
 $xmlDir = Select-Folder "Wskaz folder z plikami XML rozdzialow" $cfg.lastXmlDir ([Environment]::GetFolderPath("MyDocuments"))
 if (-not $xmlDir) { return }
@@ -50,7 +44,6 @@ $xmlFile = Show-Picker `
     -ExtensionsLabel "*.xml  (Matroska Chapters)"
 if (-not $xmlFile) { return }
 
-# Podsumowanie
 $srcDir  = Split-Path $videoFile -Parent
 $srcBase = [IO.Path]::GetFileNameWithoutExtension($videoFile)
 $outFile = Join-Path $srcDir "$srcBase - timeline.mkv"
@@ -88,7 +81,6 @@ $outSize = Format-Size (Get-Item $outFile).Length
 Write-Host "  [OK] Gotowe!  ($outSize)" -ForegroundColor Green
 Write-Host "  $outFile" -ForegroundColor White
 
-# Opcja zastapienia oryginalu
 Write-Host ""
 Write-Host "  Zastapic plik zrodlowy plikiem z rozdzialami?" -ForegroundColor DarkGray
 if (Ask-TakNie "Usun oryginal i przemianuj?" $false) {

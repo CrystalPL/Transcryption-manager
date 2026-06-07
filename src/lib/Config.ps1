@@ -1,6 +1,4 @@
-﻿# Config.ps1 -- odczyt/zapis konfiguracji JSON
-
-<#
+﻿<#
 .SYNOPSIS Wczytuje konfiguracje z pliku JSON. Zwraca pusty PSCustomObject jesli brak.
 #>
 function Read-Config {

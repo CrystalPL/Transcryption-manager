@@ -1,9 +1,5 @@
 ﻿#Requires -Version 5.1
-# Manager.ps1 -- entry point dla aplikacji Transcription Manager
-# Dot-source'uje lib/, pokazuje menu glowne, uruchamia Scripts/
 
-# Wymus UTF-8 w konsoli (zeby polskie znaki w nazwach plikow sie poprawnie wyswietlaly)
-# PS 5.1 domyslnie uzywa systemowego code page (CP1250 dla PL Windows) -- nie zgadza sie z UTF-8 plikow
 try {
     [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
     [Console]::InputEncoding  = [System.Text.UTF8Encoding]::new()
@@ -14,21 +10,14 @@ $ScriptRoot = Split-Path $PSCommandPath -Parent
 $LibDir     = Join-Path $ScriptRoot "lib"
 $ScriptsDir = Join-Path $ScriptRoot "Scripts"
 
-# ============== ZALADUJ WSZYSTKIE BIBLIOTEKI ==============
-# Kolejnosc wazna: Format -> Ansi -> Console -> reszta.
-# Lista pochodzi z LoadOrder.ps1 (jedno zrodlo prawdy, wspoldzielone z bootstrapem
-# workera w Watch-Farm.ps1). LoadOrder.ps1 ladujemy jawnie -- nie ma go w liscie.
 . (Join-Path $LibDir 'LoadOrder.ps1')
 $libOrder = Get-LibLoadOrder
 foreach ($libFile in $libOrder) {
     . (Join-Path $LibDir $libFile)
 }
 
-# Dopisz portable narzedzia (runtime.json) na poczatek PATH -- whisper sam odpala
-# ffmpeg przez subprocess i znajduje go po PATH, wiec MUSI tu trafic. No-op bez manifestu.
 Initialize-RuntimePath
 
-# ============== MENU GLOWNE ==============
 function Show-MainMenu {
     $w = Get-ConsoleWidth
     $b = "-" * ($w - 4)
@@ -90,11 +79,9 @@ function Invoke-Script {
         $null = Read-Host "`n  Nacisnij Enter..."
         return
     }
-    # Dot-source -- skrypt ma dostep do funkcji z lib/
     . $path
 }
 
-# ============== PETLA MENU ==============
 while ($true) {
     Show-MainMenu
     $k = [Console]::ReadKey($true)

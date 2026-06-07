@@ -1,8 +1,4 @@
-﻿# LoadOrder.ps1 -- jedno zrodlo prawdy kolejnosci ladowania bibliotek lib/.
-# Plik bez zaleznosci (nie wola innych lib) -- ladowany jawnie jako pierwszy,
-# zanim cokolwiek innego z lib/ trafi do sesji.
-
-<#
+﻿<#
 .SYNOPSIS
 Zwraca nazwy plikow lib/ w poprawnej kolejnosci ladowania (dot-source).
 .DESCRIPTION

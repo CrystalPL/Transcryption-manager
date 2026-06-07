@@ -1,7 +1,4 @@
-﻿# Send-FarmJobs.ps1 -- dodaje zlecenia transkrypcji do kolejki farmy (todo\).
-# Reuse: Select-Folder, Show-MultiPicker, Config, Farm.ps1. Whispera NIE odpala.
-
-$VideoExtensions = Get-VideoExtensions
+﻿$VideoExtensions = Get-VideoExtensions
 
 $ProjectRoot = Split-Path $PSCommandPath -Parent | Split-Path -Parent
 $ConfigDir   = if ($env:TRANSCRIPTION_CONFIG_DIR) { $env:TRANSCRIPTION_CONFIG_DIR } else { $ProjectRoot }
@@ -12,11 +9,9 @@ $cfg = Read-Config -Path $ConfigPath -Default @{
     model = "medium"; language = "Polish"; fp16 = "True"
 }
 
-# Sciezka kolejki: env override (spojnie z konwencja) -> config -> pytanie.
 $queuePath = if ($env:TRANSCRIPTION_FARM_DIR) { $env:TRANSCRIPTION_FARM_DIR } else { $cfg.queuePath }
 
 while ($true) {
-    # KROK 1: sciezka kolejki
     Show-Header -Title "Farma: dodaj zlecenia" -Krok "[1/3]" -Subtitle "Wskaz wspolny folder kolejki (UNC)"
     if ($queuePath -and (Test-Path $queuePath)) {
         Write-Host "  Kolejka : " -NoNewline -ForegroundColor DarkGray; Write-Host $queuePath -ForegroundColor Cyan
@@ -33,7 +28,6 @@ while ($true) {
     }
     Update-Config -Path $ConfigPath -Key "queuePath" -Value $queuePath
 
-    # KROK 2: folder zrodlowy + multipicker
     Show-Header -Title "Farma: dodaj zlecenia" -Krok "[2/3]" -Subtitle "Wybierz folder z nagraniami"
     $sourceDir = Select-Folder "Wskaz folder z nagraniami (osiagalny dla workerow!)" $cfg.lastSourceDir ([Environment]::GetFolderPath("MyVideos"))
     if (-not $sourceDir) { return }
@@ -51,7 +45,6 @@ while ($true) {
     $selectedFiles = @($pickerResult | Where-Object { $_ -and $_ -is [string] })
     if ($selectedFiles.Count -eq 0) { continue }
 
-    # KROK 3: folder docelowy + parametry
     Show-Header -Title "Farma: dodaj zlecenia" -Krok "[3/3]" -Subtitle "Wybierz folder docelowy (osiagalny sieciowo)"
     $outputDir = Select-Folder "Wskaz folder docelowy wynikow" $cfg.defaultOutput $sourceDir
     if (-not $outputDir) { return }
@@ -68,7 +61,6 @@ while ($true) {
         model = $modelVal; language = $langVal; fp16 = $fp16Val
     }
 
-    # Podsumowanie + decyzja (wzorzec z New-Transcription)
     Clear-Host
     $w = Get-ConsoleWidth; $b = "-" * ($w - 4)
     Write-Host ""
@@ -99,7 +91,6 @@ while ($true) {
     $cfg = Read-Config -Path $ConfigPath -Default @{}
 }
 
-# ============== WRZUCANIE ZLECEN ==============
 $created = 0
 foreach ($f in $selectedFiles) {
     try {

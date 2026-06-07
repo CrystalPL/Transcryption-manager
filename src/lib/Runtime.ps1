@@ -1,11 +1,7 @@
-﻿# Runtime.ps1 -- rozwiazywanie sciezek do narzedzi (portable vs system) z runtime.json
-# Wsteczna kompatybilnosc: brak manifestu -> fallback do Get-Command / golej nazwy.
-
-<#
+﻿<#
 .SYNOPSIS Zwraca root instalacji (src/lib -> src -> root).
 #>
 function Get-RuntimeRoot {
-    # lib/Runtime.ps1 -> lib -> src -> root instalacji
     return (Split-Path $PSCommandPath -Parent | Split-Path -Parent | Split-Path -Parent)
 }
 
@@ -28,7 +24,6 @@ function Get-RuntimeManifest {
     } catch {
         return $null
     }
-    # PS 5.1: ConvertFrom-Json zwraca PSCustomObject -> konwersja recznie petla.
     $ht = @{}
     foreach ($p in $json.PSObject.Properties) {
         $entry = @{}

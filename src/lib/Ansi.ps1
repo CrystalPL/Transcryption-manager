@@ -1,9 +1,5 @@
-﻿# Ansi.ps1 -- kody escape do batched output bez migania
-# Win10/11 conhost obsluguje natywnie (VirtualTerminalProcessing)
+﻿$script:ESC = [char]27
 
-$script:ESC = [char]27
-
-# Wymus wlaczenie VT mode (na wypadek starszego conhostu)
 function Enable-VirtualTerminal {
     try {
         if (-not ("Native.VT" -as [type])) {

@@ -1,7 +1,4 @@
-﻿# MultiPicker.ps1 -- multi-select picker plikow z jednego folderu
-# Wymaga: Ansi.ps1, Console.ps1, Format.ps1, ShellMetadata.ps1
-
-$script:MpW           = 80
+﻿$script:MpW           = 80
 $script:MpItemListRow = 11
 
 function Format-MpFileLabel {

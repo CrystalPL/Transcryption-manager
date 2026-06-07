@@ -181,10 +181,8 @@ function Invoke-Dependencies {
     $manifest    = @{}
     $needRuntime = $false
 
-    # Faza 1: interaktywny wybor trybow
     $tasks = Show-DepsConfig $deps
 
-    # Scriptblocki instalacji — tylko prymitywne argumenty, bezpieczne dla Start-Job
     $sbPython = {
         param($zipPath, $runtimeDir)
         try {
@@ -206,8 +204,6 @@ function Invoke-Dependencies {
             $py = Join-Path $dest "python.exe"
             if (-not (Test-Path $py)) { return $false }
 
-            # PYTHONHOME/PYTHONPATH od systemowego Pythona psuja ladowanie modulow
-            # embeddable Pythona — musimy je wyczyścic przed kazdym wywolaniem.
             $env:PYTHONHOME = $null
             $env:PYTHONPATH = $null
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -215,6 +211,11 @@ function Invoke-Dependencies {
             (New-Object System.Net.WebClient).DownloadFile("https://bootstrap.pypa.io/get-pip.py", $getpip)
             & $py $getpip --no-warn-script-location 2>&1 | Out-Null
             Remove-Item $getpip -Force -ErrorAction SilentlyContinue
+
+            [System.IO.File]::WriteAllText(
+                (Join-Path $dest "pip.ini"),
+                "[install]`nno-build-isolation = true`n"
+            )
 
             return ((Test-Path (Join-Path $dest "Scripts\pip.exe")) -or
                     (Test-Path (Join-Path $dest "Lib\site-packages\pip")))
@@ -245,7 +246,6 @@ function Invoke-Dependencies {
         try {
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-            # Jesli zip nie zostal pobrany wczesniej — pobierz teraz
             if (-not $zipPath -or -not (Test-Path $zipPath)) {
                 $ver = $null
                 try {
@@ -296,7 +296,6 @@ function Invoke-Dependencies {
     }
 
 
-    # Tabela postepu
     $w   = [Console]::WindowWidth
     $sep = "  " + ("-" * [Math]::Min($w - 4, 62))
 
@@ -328,7 +327,6 @@ function Invoke-Dependencies {
     }
     [Console]::SetCursorPosition(0, $afterRow)
 
-    # Faza 2: rownolegla pobieranie (wszystkie portable z URL jednoczesnie)
     $dlJobs = @{}
 
     foreach ($t in $tasks) {
@@ -375,7 +373,6 @@ function Invoke-Dependencies {
                     $st[$nm].DlBytes = $dl
                     $st[$nm].Pct     = if ($tot -gt 0) { [int]($dl * 100 / $tot) } else { 0 }
                 } else {
-                    # Zakończony przed tym tickiem — finalizuj od razu
                     $null = Receive-Job -Job $djob -ErrorAction SilentlyContinue
                     if ($djob.State -eq 'Failed') {
                         $st[$nm].Phase = 'err'
@@ -420,10 +417,8 @@ function Invoke-Dependencies {
     }
     [Console]::SetCursorPosition(0, $afterRow)
 
-    # Faza 3: instalacja
     $whisperTask = $null
 
-    # 3a: reuse + system (sekwencyjnie — system moze wymagac interakcji z wingetem)
     foreach ($t in $tasks) {
         $dep  = $t.Dep
         $name = $dep.Name
@@ -452,7 +447,6 @@ function Invoke-Dependencies {
         }
     }
 
-    # 3b: portable Python/ffmpeg/mkvmerge — rownolegle Start-Joby
     $portableJobs = @{}
     foreach ($t in $tasks) {
         $dep  = $t.Dep
@@ -506,7 +500,6 @@ function Invoke-Dependencies {
     }
     [Console]::SetCursorPosition(0, $afterRow)
 
-    # Whisper (pip, wolny) — musi byc po instalacji Pythona
     if ($whisperTask) {
         $dep  = $whisperTask.Dep
         $name = $dep.Name
@@ -528,7 +521,6 @@ function Invoke-Dependencies {
             $env:PYTHONHOME       = $null; $env:PYTHONPATH = $null
             $env:PYTHONUNBUFFERED = '1';   $env:PYTHONIOENCODING = 'utf-8'
 
-            # Embeddable Python nie ma setuptools — bez niego pip nie moze zbudowac openai-whisper sdist.
             $setupOut = "$pipLog.setup"; $setupErr = "$pipLog.setup.err"
             $setupProc = Start-Process -FilePath $pyExe `
                 -ArgumentList @('-m', 'pip', 'install', '--upgrade', 'setuptools', 'wheel', '--no-warn-script-location') `
@@ -547,8 +539,6 @@ function Invoke-Dependencies {
                 $env:PYTHONHOME = $savedHome; $env:PYTHONPATH = $savedPath
                 $st[$name].Phase = 'err'
             } else {
-                # Start-Process zamiast Start-Job: plik logu pisany bezposrednio przez python.exe,
-                # wiec zawsze powstaje nawet gdy pip crashuje.
                 $pipLogTmp = "$pipLog.tmp"
                 $proc = Start-Process -FilePath $pyExe `
                     -ArgumentList @('-m', 'pip', 'install', '--upgrade', '--no-build-isolation', 'openai-whisper', '--no-warn-script-location') `

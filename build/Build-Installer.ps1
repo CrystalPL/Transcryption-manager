@@ -27,7 +27,6 @@ function Get-RelPath {
     return (Split-Path $Full -Leaf)
 }
 
-# Kolejnosc plikow do sklejenia. Dependency.ps1 PRZED pochodnymi (PS class inheritance).
 $files = New-Object System.Collections.Generic.List[string]
 
 Get-ChildItem (Join-Path $installDir "Core") -Filter *.ps1 | Sort-Object Name |
@@ -68,7 +67,6 @@ $sb = New-Object System.Text.StringBuilder
 foreach ($f in $files) {
     $rel = Get-RelPath $f
     [void]$sb.AppendLine("# === $rel ===")
-    # Czytaj bez BOM, doklej tresc (BOM trafia tylko na poczatek calego pliku przy zapisie).
     $content = [System.IO.File]::ReadAllText($f, [System.Text.UTF8Encoding]::new($false))
     [void]$sb.AppendLine($content)
     [void]$sb.AppendLine("")
@@ -88,9 +86,6 @@ if ($err.Count -gt 0) {
     throw "Bledy skladniowe w zbudowanym installerze: $msg"
 }
 
-# irm dekoduje pliki z GitHub releases bez charset=utf-8, uzywa systemowego ANSI i psuje polskie
-# znaki w literalach przed iex. Konwertujemy wszystkie non-ASCII do $([char]N) — czyste ASCII,
-# dziala z kazdym dekodem. W double-quoted strings $([char]N) jest ewaluowane do wlasciwego znaku.
 $safe = New-Object System.Text.StringBuilder ($out.Length * 2)
 foreach ($c in $out.ToCharArray()) {
     if ([int]$c -gt 127) { [void]$safe.Append('$([char]' + [int]$c + ')') }

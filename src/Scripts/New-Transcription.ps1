@@ -1,11 +1,5 @@
-﻿# New-Transcription.ps1 -- generowanie transkrypcji whisperem z dashboard'em postepu
+﻿$VideoExtensions = Get-VideoExtensions
 
-$VideoExtensions = Get-VideoExtensions
-
-# Sciezki: env vars (IntelliJ dev) -> w innym wypadku obok zainstalowanej aplikacji.
-# $PSCommandPath to lokalizacja TEGO skryptu (Scripts/New-Transcription.ps1),
-# wiec ..\.. to root instalacji (C:\Transkrypcja gdy install.ps1 -InstallDir default,
-# albo D:\Whatever gdy zainstalowano gdzie indziej).
 $ProjectRoot = Split-Path $PSCommandPath -Parent | Split-Path -Parent
 
 $ConfigDir  = if ($env:TRANSCRIPTION_CONFIG_DIR) { $env:TRANSCRIPTION_CONFIG_DIR } else { $ProjectRoot }
@@ -26,18 +20,15 @@ $cfg = Read-Config -Path $ConfigPath -Default @{
     lastSourceDir = ""; lastOutputDir = ""; fp16 = "True"
 }
 
-# ============== ETAPY KONFIGURACJI W PETLI (mozna cofnac) ==============
 $sourceDir = ""; $selectedFiles = @(); $outputDir = ""
 $fp16Val = if ($cfg.fp16) { $cfg.fp16 } else { "True" }
 
 while ($true) {
-    # KROK 1
     Show-Header -Title "Tworzenie transkrypcji" -Krok "[1/3]" -Subtitle "Wybierz folder z nagraniami"
     $sourceDir = Select-Folder "Wskaz folder z nagraniami" $cfg.lastSourceDir ([Environment]::GetFolderPath("MyVideos"))
     if (-not $sourceDir) { return }
     Update-Config -Path $ConfigPath -Key "lastSourceDir" -Value $sourceDir
 
-    # KROK 2
     $pickerResult = Show-MultiPicker `
         -DirPath  $sourceDir `
         -Title    "Tworzenie transkrypcji" `
@@ -45,16 +36,12 @@ while ($true) {
         -Extensions $VideoExtensions `
         -ExtensionsLabel "mkv, mp4, avi, mov, wmv, ts, mts..."
 
-    # $null = uzytkownik anulowal (Esc); @() = pusty folder, wroc do wyboru folderu;
-    # @("..","..") = wybrane pliki
     if ($null -eq $pickerResult) { return }
     if ($pickerResult.Count -eq 0) { continue }   # pusty folder -> wroc do KROK 1
 
-    # Defensywna ochrona przed pipeline-pollution
     $selectedFiles = @($pickerResult | Where-Object { $_ -and $_ -is [string] })
     if ($selectedFiles.Count -eq 0) { continue }
 
-    # KROK 3
     Show-Header -Title "Tworzenie transkrypcji" -Krok "[3/3]" -Subtitle "Wybierz folder docelowy"
     $outputDir = Select-Folder "Wskaz folder docelowy" $cfg.lastOutputDir $sourceDir
     if (-not $outputDir) {
@@ -68,7 +55,6 @@ while ($true) {
         lastSourceDir = $sourceDir; lastOutputDir = $outputDir; fp16 = $fp16Val
     }
 
-    # Podsumowanie + decyzja
     Clear-Host
     $w = Get-ConsoleWidth; $b = "-" * ($w - 4)
     Write-Host ""
@@ -98,15 +84,12 @@ while ($true) {
     $cfg = Read-Config -Path $ConfigPath -Default @{}
 }
 
-# ============== PRZETWARZANIE ==============
 $logsDir = Join-Path $LogsRoot (Get-Date -Format 'yyyyMMdd_HHmmss')
 New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
 
-# PYTHONUNBUFFERED -- bez tego logi sa puste az do zakonczenia procesu
 $env:PYTHONUNBUFFERED = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
-# Build state per plik
 $states = @()
 foreach ($f in $selectedFiles) {
     $states += New-WhisperState -Path $f -LogsDir $logsDir

@@ -1,7 +1,4 @@
-﻿# ShellMetadata.ps1 -- odczyt metadanych plikow przez Shell COM
-# (to samo zrodlo co Eksplorator Windows: dlugosc video, kodek itd.)
-
-<#
+﻿<#
 .SYNOPSIS Zwraca hashtable: nazwaPliku -> dlugosc (string "HH:MM:SS").
 .PARAMETER DirPath Folder w ktorym sa pliki
 .PARAMETER FileNames Lista nazw plikow (bez sciezki)
@@ -16,7 +13,6 @@ function Get-ShellDurations {
         $shellApp = New-Object -ComObject Shell.Application
         $shellDir = $shellApp.Namespace($DirPath)
 
-        # Znajdz indeks kolumny "Dlugosc" / "Length" -- rozny na roznych Windowsach
         $durIdx = 27   # typowy default
         for ($i = 0; $i -lt 350; $i++) {
             $pn = $shellDir.GetDetailsOf($null, $i)

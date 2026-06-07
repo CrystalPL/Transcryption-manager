@@ -1,8 +1,4 @@
-﻿# Whisper.ps1 -- uruchamianie i finalizacja zadan whispera (wspoldzielone przez
-# transkrypcje lokalna New-Transcription i tryb workera farmy Start-FarmWorker)
-# Wymaga: ShellMetadata.ps1 (Read-FileSafe)
-
-<#
+﻿<#
 .SYNOPSIS Sprawdza czy whisper jest dostepny w PATH (nie odpala procesu).
 #>
 function Test-Whisper {

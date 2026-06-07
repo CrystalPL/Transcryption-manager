@@ -6,7 +6,6 @@
     }
 
     hidden [string] LatestVersion() {
-        # Proba 1: GitLab API
         try {
             $resp = Invoke-RestMethod `
                 -Uri "https://gitlab.com/api/v4/projects/mbunkus%2Fmkvtoolnix/releases?per_page=1" `
@@ -15,7 +14,6 @@
             $ver = if ($tag) { $tag -replace '^release-', '' } else { $null }
             if ($ver -match '^\d') { return $ver }
         } catch {}
-        # Proba 2: scraping strony pobierania
         try {
             $page  = Invoke-WebRequest -Uri "https://mkvtoolnix.download/downloads.html" -UseBasicParsing
             $match = [regex]::Match($page.Content, 'mkvtoolnix-64-bit-([\d.]+)\.7z')
@@ -43,7 +41,6 @@
 
     [bool] InstallFromZip([string]$SevenZPath, [string]$RuntimeDir) {
         $dest   = Join-Path $RuntimeDir "mkvtoolnix"
-        # Sciezka bez spacji — 7zr.exe wymaga -o bez odstepu przed sciezka
         $tmpExt = Join-Path $env:SystemDrive "tm-mkv-x"
         $7zrExe = Join-Path $env:TEMP "tm-7zr.exe"
         try {
@@ -67,7 +64,6 @@
             $binDir = Split-Path $binSrc.FullName -Parent
             if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
             New-Item -ItemType Directory -Path $dest -Force | Out-Null
-            # Kopiujemy caly katalog — mkvmerge wymaga towarzyszacych .dll
             Copy-Item (Join-Path $binDir "*") -Destination $dest -Recurse -Force
             Remove-Item $tmpExt -Recurse -Force -EA SilentlyContinue
 

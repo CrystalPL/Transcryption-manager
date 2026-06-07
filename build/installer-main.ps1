@@ -1,8 +1,4 @@
-﻿# === installer-main (release tail) ===
-# Ten plik jest DOKLEJANY na koniec installer.ps1. Klasy/funkcje install/ sa juz
-# zdefiniowane inline powyzej. Nie dot-source'ujemy niczego.
-
-$InstallDir = $env:TM_INSTALL_DIR
+﻿$InstallDir = $env:TM_INSTALL_DIR
 $NoShortcut = $env:TM_NO_SHORTCUT -eq "1"
 $NoDeps     = $env:TM_NO_DEPS     -eq "1"
 
@@ -27,9 +23,6 @@ try {
 if (Test-Path $srcDir) { Remove-Item $srcDir -Recurse -Force }
 Expand-Archive -Path $srcZip -DestinationPath $srcDir -Force
 
-# RepoRoot musi byc katalogiem zawierajacym 'src'. src.zip pakuje folder 'src'
-# (Compress-Archive -Path src), wiec po rozpakowaniu $srcDir\src istnieje ->
-# $srcDir JEST RepoRootem. Gdyby zip mial dodatkowy katalog-wrapper, schodzimy do niego.
 $repoRoot = $srcDir
 if (-not (Test-Path (Join-Path $repoRoot "src"))) {
     $inner = Get-ChildItem $srcDir -Directory | Where-Object { Test-Path (Join-Path $_.FullName "src") } | Select-Object -First 1

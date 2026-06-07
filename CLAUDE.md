@@ -232,11 +232,9 @@ Skoro mamy BOM, wszystkie znaki Unicode działają (em-dash `—`, strzałki `�
 
 Każda publiczna funkcja ma blok `<# .SYNOPSIS ... .PARAMETER ... .EXAMPLE ... #>` — działa `Get-Help Show-Picker -Full`.
 
-### Brak komentarzy "co robi linia"
+### Brak komentarzy
 
-Komentuj **WHY** (powód decyzji, hidden gotcha, nieoczywisty workaround), **NIGDY WHAT** (to widać z kodu). Jeśli kod się tłumaczy sam — bez komentarza.
-
-Komentuj **WHY** (hidden constraint, gotcha, workaround), **NIGDY WHAT** (to widać z kodu). Jeśli nazwa funkcji + body tłumaczą się same — brak komentarza. Nie rób sekcyjnych `# --- Python ---` gdy nazwa klasy mówi to samo.
+**Nie dodawaj żadnych komentarzy w kodzie** — ani `# co robi linia`, ani `# dlaczego`. Kod ma mówić sam za siebie przez nazwy. Jedyny wyjątek: `<# .SYNOPSIS ... #>` bloki help dla publicznych funkcji (bo działają z `Get-Help`).
 
 ### Ścieżki — używaj `$PSCommandPath` nie `$PSScriptRoot`
 

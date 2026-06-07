@@ -1,6 +1,4 @@
-﻿# Format.ps1 -- formatowanie wartosci i sortowanie
-
-<#
+﻿<#
 .SYNOPSIS Konwertuje rozmiar w bajtach na czytelny string (KB/MB/GB).
 #>
 function Format-Size {

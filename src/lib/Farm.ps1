@@ -1,9 +1,4 @@
-﻿# Farm.ps1 -- prymitywy farmy transkrypcji (kolejka na wspolnym folderze).
-# Atomowy claim przez Move-Item (rename na SMB jest atomowy), heartbeat,
-# reclaim zombie zadan. Wymaga: ShellMetadata.ps1 (Read-FileSafe), Config.ps1.
-
-# Prog wieku heartbeatu (sekundy), po ktorym worker uznawany jest za martwego.
-$script:FarmHeartbeatTimeoutSec = 120
+﻿$script:FarmHeartbeatTimeoutSec = 120
 
 <#
 .SYNOPSIS Zwraca PSCustomObject ze sciezkami podfolderow kolejki.
@@ -109,12 +104,10 @@ function Invoke-FarmClaim {
         try {
             Move-Item -Path $f.FullName -Destination $dest -EA Stop
         } catch {
-            # Przegralismy wyscig (inny worker zatrzasnal) -- probuj nastepne.
             continue
         }
         $job = Read-FarmJob $dest
         if ($null -eq $job) {
-            # Uszkodzony deskryptor -- przenies do failed i probuj dalej.
             $errPath = (Join-Path $p.Failed $f.Name)
             try { Move-Item -Path $dest -Destination $errPath -Force -EA Stop } catch {}
             Set-Content -Path ($errPath + ".error") -Value "Niepoprawny JSON zlecenia." -Encoding UTF8 -EA SilentlyContinue
@@ -194,7 +187,6 @@ function Invoke-FarmReclaim {
             Write-FarmLog $QueuePath "Reclaim: $($f.Name) (zombie >${script:FarmHeartbeatTimeoutSec}s)"
             $reclaimed++
         } catch {
-            # Ktos inny wlasnie pracuje/przenosi -- pomijamy.
         }
     }
     return $reclaimed

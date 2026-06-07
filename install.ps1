@@ -59,7 +59,6 @@ if (-not (Test-Path $instDir)) {
 
 Get-ChildItem (Join-Path $instDir "Core") -Filter *.ps1 | ForEach-Object { . $_.FullName }
 
-# Klasa bazowa Dependency musi sie zaladowac przed pochodnymi (PS class inheritance)
 . (Join-Path $instDir "Dependencies\Dependency.ps1")
 Get-ChildItem (Join-Path $instDir "Dependencies") -Filter "*Dependency.ps1" |
     Where-Object { $_.Name -ne "Dependency.ps1" } | ForEach-Object { . $_.FullName }

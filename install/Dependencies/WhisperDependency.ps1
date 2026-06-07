@@ -21,8 +21,6 @@
             return $false
         }
         Write-Host "        Instalacja openai-whisper (PyTorch ~2.5-3 GB)..." -ForegroundColor Yellow
-        # try/catch: pip zapisuje bledy na stderr, ktory PS5.1 z ErrorActionPreference=Stop
-        # traktuje jako wyjatki — łapiemy zeby nie wywalac calego instalatora.
         try {
             & $py -m pip install --upgrade openai-whisper --no-warn-script-location
         } catch {

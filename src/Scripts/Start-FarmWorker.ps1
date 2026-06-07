@@ -1,7 +1,4 @@
-﻿# Start-FarmWorker.ps1 -- tryb workera farmy: bierze zlecenia z kolejki, odpala
-# whispera, odklada wyniki. Reuse: Whisper.ps1, Farm.ps1, Dashboard.ps1.
-
-$ProjectRoot = Split-Path $PSCommandPath -Parent | Split-Path -Parent
+﻿$ProjectRoot = Split-Path $PSCommandPath -Parent | Split-Path -Parent
 $ConfigDir   = if ($env:TRANSCRIPTION_CONFIG_DIR) { $env:TRANSCRIPTION_CONFIG_DIR } else { $ProjectRoot }
 $ConfigPath  = Join-Path $ConfigDir "Farm.config.json"
 $LogsRoot    = if ($env:TRANSCRIPTION_LOGS_DIR) { $env:TRANSCRIPTION_LOGS_DIR } else { Join-Path $ProjectRoot "logi" }
@@ -32,7 +29,6 @@ if (-not (Initialize-FarmQueue $queuePath)) {
 $env:PYTHONUNBUFFERED = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
-# Renderuje ekran "czekam na zadania" (jeden Write, bez Clear-Host).
 function Render-WorkerIdle {
     param([object]$Counts)
     $w = [Math]::Max(80, [Console]::WindowWidth - 1); $b = "-" * ($w - 4)
@@ -62,10 +58,8 @@ try {
     $lastW = [Console]::WindowWidth; $lastH = [Console]::WindowHeight
 
     while ($running) {
-        # 1. Reclaim przeterminowanych zlecen.
         Invoke-FarmReclaim $queuePath | Out-Null
 
-        # 2. Sprobuj zatrzasnac zadanie.
         $job = $null
         try { $job = Invoke-FarmClaim $queuePath } catch { $job = $null }
 
@@ -77,7 +71,6 @@ try {
             if ($curW -ne $lastW -or $curH -ne $lastH) { $lastW = $curW; $lastH = $curH; Clear-Host }
             Render-WorkerIdle $counts
 
-            # Polling ~1.5s z responsywnym ESC (50ms tick).
             $waited = 0
             while ($waited -lt 1500) {
                 if ([Console]::KeyAvailable) {
@@ -92,7 +85,6 @@ try {
             continue
         }
 
-        # 3. Mamy zadanie -- odpal whispera.
         $p = Get-FarmPaths $queuePath
         $fp16 = if ($job.fp16) { $job.fp16 } else { "True" }
         $lang = if ($job.language) { $job.language } else { "Polish" }
@@ -107,7 +99,6 @@ try {
         Write-FarmLog $queuePath "Claim: $($job.id) ($($state.Name))"
 
         if (-not (Test-Path $state.Path)) {
-            # Plik zrodlowy zniknal -> failed z opisem.
             $state.Status = 'Error'
             $failDest = Join-Path $p.Failed "job-$($job.id).json"
             try { Move-Item -Path $job.ClaimedPath -Destination $failDest -Force -EA Stop } catch {}
@@ -123,13 +114,11 @@ try {
         Clear-Host
         $lastW = [Console]::WindowWidth; $lastH = [Console]::WindowHeight
 
-        # 4. Petla nadzoru biezacego zadania + heartbeat + dashboard.
         while ($state.Status -eq 'Active' -or $state.Status -eq 'Skipped') {
             if ($state.Status -eq 'Skipped') { break }
 
             Update-WhisperProgress $state
 
-            # Heartbeat + status workera co ~10s (CLAUDE.md prog reclaim 120s).
             if (((Get-Date) - $lastHb).TotalSeconds -ge 10) {
                 Update-FarmHeartbeat -QueuePath $queuePath -JobId $job.id
                 Update-FarmWorkerStatus -QueuePath $queuePath -CurrentFile $state.Name -Progress $state.Progress -Status "working"
@@ -160,7 +149,6 @@ try {
                 if ($k.Key -eq 'Escape' -or [char]::ToLower($k.KeyChar) -eq 'q') {
                     if (Ask-TakNie "Przerwac biezace zadanie i wyjsc? (zadanie wroci do kolejki)" $false) {
                         if ($state.Process -and -not $state.Process.HasExited) { try { $state.Process.Kill() } catch {} }
-                        # Oddaj zadanie: z powrotem do todo\, skasuj heartbeat.
                         try { Move-Item -Path $job.ClaimedPath -Destination (Join-Path $p.Todo "job-$($job.id).json") -Force -EA Stop } catch {}
                         $hb = Join-Path $p.Claimed "job-$($job.id).heartbeat"
                         if (Test-Path $hb) { Remove-Item $hb -Force -EA SilentlyContinue }
@@ -174,7 +162,6 @@ try {
 
         if (-not $running) { break }
 
-        # 5. Rozstrzygnij wynik: done / failed (Skipped traktujemy jak done).
         $hb = Join-Path $p.Claimed "job-$($job.id).heartbeat"
         if ($state.Status -eq 'Done' -or $state.Status -eq 'Skipped') {
             try { Move-Item -Path $job.ClaimedPath -Destination (Join-Path $p.Done "job-$($job.id).json") -Force -EA Stop } catch {}

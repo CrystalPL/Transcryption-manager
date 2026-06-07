@@ -1,7 +1,4 @@
-﻿# Picker.ps1 -- single-select picker plikow z nawigacja po katalogach
-# Wymaga: Ansi.ps1, Console.ps1, Format.ps1, ShellMetadata.ps1
-
-$script:PickerW           = 80
+﻿$script:PickerW           = 80
 $script:PickerItemListRow = 11
 
 function Format-PickerFileLabel {
@@ -50,7 +47,6 @@ function Render-Picker {
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.Append("$script:ESC[H")
 
-    # Naglowek -- 11 wierszy
     [void]$sb.Append("`n")
     [void]$sb.Append((Wrap-Ansi (Fit "  +$b+" $w) 'DarkCyan') + "`n")
     [void]$sb.Append((Wrap-Ansi (Fit "  | $Tytul  $Krok" $w) 'Cyan') + "`n")
@@ -112,7 +108,6 @@ function Show-Picker {
         while ($true) {
             $script:PickerW = Get-ConsoleWidth
 
-            # Zbuduj liste elementow
             $items  = [System.Collections.ArrayList]@()
             $parent = Split-Path $currentPath -Parent
 
@@ -187,7 +182,6 @@ function Show-Picker {
                 $action  = $null
                 $actionPath = $null
 
-                # Coalesce powtorzenia strzalek przy przytrzymaniu
                 $repeat = 1
                 if ($k.Key -eq 'UpArrow' -or $k.Key -eq 'DownArrow') {
                     while ([Console]::KeyAvailable) {

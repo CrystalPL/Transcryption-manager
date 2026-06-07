@@ -1,4 +1,4 @@
-class FfmpegDependency : Dependency {
+﻿class FfmpegDependency : Dependency {
     FfmpegDependency() {
         $this.Name             = "ffmpeg"
         $this.Command          = "ffmpeg"
@@ -28,7 +28,6 @@ class FfmpegDependency : Dependency {
             Expand-Archive -Path $ZipPath -DestinationPath $tmp -Force
             Remove-Item $ZipPath -Force -EA SilentlyContinue
 
-            # ZIP rozpakowuje sie do podfolderu ffmpeg-*-essentials_build\bin\
             $binSrc = Get-ChildItem $tmp -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
             if (-not $binSrc) {
                 Write-Host "        [FAIL] Brak ffmpeg.exe w archiwum" -ForegroundColor Red

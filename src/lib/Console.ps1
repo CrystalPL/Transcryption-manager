@@ -1,7 +1,4 @@
-﻿# Console.ps1 -- wspolne UI: naglowki, pytania T/N
-
-# Szerokosc okna konsoli minus 1 (zeby kursor nie owijal)
-function Get-ConsoleWidth {
+﻿function Get-ConsoleWidth {
     return [Math]::Max(72, [Console]::WindowWidth - 1)
 }
 
@@ -42,7 +39,6 @@ function Ask-TakNie {
     while ($true) {
         $k = [Console]::ReadKey($true)
         $c = [char]::ToLower($k.KeyChar)
-        # Enter, spacja i inne klawisze sa ignorowane — wymagamy explicit T lub N
         if ($c -eq 't' -or $c -eq 'y') { Write-Host "Tak" -ForegroundColor Green; return $true  }
         if ($c -eq 'n')                 { Write-Host "Nie" -ForegroundColor Red;   return $false }
     }

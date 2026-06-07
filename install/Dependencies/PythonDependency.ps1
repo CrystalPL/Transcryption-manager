@@ -1,4 +1,4 @@
-class PythonDependency : Dependency {
+﻿class PythonDependency : Dependency {
     PythonDependency() {
         $this.Name             = "Python"
         $this.Command          = "python"
@@ -70,6 +70,11 @@ class PythonDependency : Dependency {
             Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getpip -UseBasicParsing
             & $py $getpip --no-warn-script-location
             Remove-Item $getpip -Force -EA SilentlyContinue
+
+            [System.IO.File]::WriteAllText(
+                (Join-Path $dest "pip.ini"),
+                "[install]`nno-build-isolation = true`n"
+            )
 
             $pipOk = (Test-Path (Join-Path $dest "Scripts\pip.exe")) -or
                      (Test-Path (Join-Path $dest "Lib\site-packages\pip"))
