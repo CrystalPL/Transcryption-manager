@@ -572,6 +572,9 @@ function Invoke-Dependencies {
     }
     [Console]::SetCursorPosition(0, $afterRow)
 
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
+                [System.Environment]::GetEnvironmentVariable("PATH", "User")
+
     if ($whisperTask) {
         $dep  = $whisperTask.Dep
         $name = $dep.Name
