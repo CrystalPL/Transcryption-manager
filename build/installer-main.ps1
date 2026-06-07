@@ -42,8 +42,9 @@ if (-not (Test-Path (Join-Path $repoRoot "src"))) {
     exit 1
 }
 
+$logDir = $null
 try {
-    Invoke-Install -RepoRoot $repoRoot -InstallDir $InstallDir -NoShortcut:$NoShortcut -NoDeps:$NoDeps -LogFile $logFile
+    $logDir = Invoke-Install -RepoRoot $repoRoot -InstallDir $InstallDir -NoShortcut:$NoShortcut -NoDeps:$NoDeps -LogFile $logFile
 } catch [OperationCanceledException] {
     Remove-Item $srcZip -Force -EA SilentlyContinue
     Remove-Item $srcDir -Recurse -Force -EA SilentlyContinue
@@ -53,4 +54,7 @@ try {
 }
 
 $null = Stop-Transcript -ErrorAction SilentlyContinue
+if ($logDir -and (Test-Path $logFile)) {
+    try { Move-Item $logFile (Join-Path $logDir "install.log") -Force -ErrorAction Stop } catch {}
+}
 $null = Read-Host "  Naciśnij dowolny klawisz aby zamknąć"

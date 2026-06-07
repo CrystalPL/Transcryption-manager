@@ -5,7 +5,7 @@
     .PARAMETER InstallDir Folder docelowy; pusty = Get-InstallDir zapyta/użyje domyślnego.
     .PARAMETER NoShortcut Pomiń tworzenie skrótu Start Menu.
     .PARAMETER NoDeps Pomiń instalację zależności.
-    .PARAMETER LogFile Ścieżka logu instalacji (do wyświetlenia w podsumowaniu).
+    .PARAMETER LogFile Ścieżka tymczasowego logu instalacji (transkrypt; przenoszony do LogDir po Stop-Transcript).
     .EXAMPLE Invoke-Install -RepoRoot C:\tmp\repo -InstallDir C:\Transkrypcja
     #>
     param(
@@ -21,10 +21,14 @@
     Write-Host "`n  Folder instalacji: " -NoNewline -ForegroundColor DarkGray
     Write-Host $InstallDir -ForegroundColor Cyan
 
+    $LogDir = Join-Path $InstallDir "logs\$(Get-Date -Format 'yyyyMMdd')"
+    if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+
     Invoke-SystemCheck
     Invoke-CopyApp      -RepoRoot $RepoRoot -InstallDir $InstallDir
-    Invoke-Dependencies -NoDeps:$NoDeps -InstallDir $InstallDir
+    Invoke-Dependencies -NoDeps:$NoDeps -InstallDir $InstallDir -LogDir $LogDir
     Invoke-Shortcut     -InstallDir $InstallDir -NoShortcut:$NoShortcut
 
-    Show-Summary -InstallDir $InstallDir -LogFile $LogFile
+    Show-Summary -InstallDir $InstallDir -LogFile (Join-Path $LogDir "install.log")
+    return $LogDir
 }
