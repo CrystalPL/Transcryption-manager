@@ -544,31 +544,46 @@ function Invoke-Dependencies {
                 $st[$name].Phase = 'err'
             } else {
                 $pipLogTmp = "$pipLog.tmp"
-                $proc = Start-Process -FilePath $pyExe `
-                    -ArgumentList @('-m', 'pip', 'install', '--upgrade', '--no-build-isolation', 'openai-whisper', '--no-warn-script-location') `
-                    -RedirectStandardOutput $pipLogTmp `
-                    -RedirectStandardError  $pipLogErr `
-                    -NoNewWindow -PassThru
+                $pipArgs   = @('-m', 'pip', 'install', '--upgrade', '--no-build-isolation', 'openai-whisper', '--no-warn-script-location', '-v')
+                Add-Content -Path $pipLog -Value "`n--- whisper pip ---`n$pyExe $($pipArgs -join ' ')" -Encoding UTF8 -ErrorAction SilentlyContinue
+
+                $proc = $null
+                try {
+                    $proc = Start-Process -FilePath $pyExe -ArgumentList $pipArgs `
+                        -RedirectStandardOutput $pipLogTmp `
+                        -RedirectStandardError  $pipLogErr `
+                        -NoNewWindow -PassThru -ErrorAction Stop
+                } catch {
+                    Add-Content -Path $pipLog -Value "BLAD Start-Process: $_" -Encoding UTF8 -ErrorAction SilentlyContinue
+                }
 
                 $env:PYTHONHOME = $savedHome; $env:PYTHONPATH = $savedPath
 
-                while (-not $proc.HasExited) {
-                    [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
-                    Render-ProgressRow $name $st[$name] $w
-                    [Console]::SetCursorPosition(0, $afterRow)
-                    Start-Sleep -Milliseconds 500
+                if ($proc) {
+                    while (-not $proc.HasExited) {
+                        [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
+                        Render-ProgressRow $name $st[$name] $w
+                        [Console]::SetCursorPosition(0, $afterRow)
+                        Start-Sleep -Milliseconds 500
+                    }
+                    Add-Content -Path $pipLog -Value "EXIT CODE: $($proc.ExitCode)" -Encoding UTF8 -ErrorAction SilentlyContinue
+                } else {
+                    Add-Content -Path $pipLog -Value "START-PROCESS nie zwrocil procesu" -Encoding UTF8 -ErrorAction SilentlyContinue
                 }
 
                 foreach ($tf in @($pipLogTmp, $pipLogErr)) {
                     if (Test-Path $tf) {
                         $tc = Get-Content $tf -Raw -ErrorAction SilentlyContinue
                         if ($tc) { Add-Content -Path $pipLog -Value $tc -Encoding UTF8 -ErrorAction SilentlyContinue }
+                        else     { Add-Content -Path $pipLog -Value "(brak output: $(Split-Path $tf -Leaf))" -Encoding UTF8 -ErrorAction SilentlyContinue }
                         Remove-Item $tf -Force -ErrorAction SilentlyContinue
+                    } else {
+                        Add-Content -Path $pipLog -Value "(plik nie powstal: $(Split-Path $tf -Leaf))" -Encoding UTF8 -ErrorAction SilentlyContinue
                     }
                 }
 
                 $scriptsDir = Join-Path (Split-Path $pyExe -Parent) "Scripts"
-                $whisperOk  = ($proc.ExitCode -eq 0) -and (Test-Path (Join-Path $scriptsDir "whisper.exe"))
+                $whisperOk  = ($proc -ne $null) -and ($proc.ExitCode -eq 0) -and (Test-Path (Join-Path $scriptsDir "whisper.exe"))
                 $st[$name].Phase = if ($whisperOk) { 'ok' } else { 'err' }
             }
         }
