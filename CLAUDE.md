@@ -439,23 +439,34 @@ Projekt stosuje **Single Responsibility** dosłownie — jeden plik, jedna odpow
 
 ```
 install/
-├── Core/                      # primitives uzywane przez wszystko
+├── Core/                      # generyczne primitives (uzywane przez wszystko)
 │   ├── Logging.ps1           # Write-OK/Skip/Missing/Info, Test-Command
-│   └── UI.ps1                # Ask-YN, Show-Header, Get-InstallDir, Show-Summary
-├── Dependencies/              # klasy zaleznosci (1 plik = 1 klasa)
+│   ├── UI.ps1                # Ask-YN, Ask-Choice, Show-Header, Get-InstallDir, Show-Summary
+│   └── ProcessGuard.ps1      # Wait-GuardedProcess, Start/Stop-TrackedJob, Stop-ProcessTree (timeouty + ubicie drzewa procesow)
+├── Dependencies/              # klasy zaleznosci — MODEL (1 plik = 1 klasa)
 │   ├── Dependency.ps1        # abstract base
 │   ├── PythonDependency.ps1
-│   ├── PipDependency.ps1
 │   ├── FfmpegDependency.ps1
 │   ├── MkvmergeDependency.ps1
 │   └── WhisperDependency.ps1
-└── Phases/                    # workflow steps
+├── DependencyInstall/         # SILNIK instalacji zaleznosci (1 plik = 1 koncern)
+│   ├── DepsDetection.ps1     # Test-RealPython/WhisperPortable/AllDepsPresent, Get-PortablePresence
+│   ├── DepsProgressUI.ps1    # Format-DownloadSize, Render-ProgressRow, Show-DepRow, Initialize-ProgressTable
+│   ├── PortableExtractors.ps1# Get-PortableExtractor (scriptblocki rozpakowujace dla Start-Job)
+│   ├── DepsTasks.ps1         # Get-InstallMode (1 globalny wybor: portable/system), Get-DepTasks
+│   ├── DepsDownloadPhase.ps1 # Invoke-DownloadPhase
+│   ├── DepsInstallPhase.ps1  # Invoke-ReuseSystemPhase, Invoke-PortableExtractPhase
+│   ├── DepsWhisperPhase.ps1  # Get-WhisperInstallPython, Install-WhisperPackage, Save-WhisperModel, Invoke-WhisperPhase
+│   └── DepsManifest.ps1      # Save-RuntimeManifest
+└── Phases/                    # workflow steps instalatora
     ├── Install.ps1
     ├── SystemCheck.ps1
     ├── CopyApp.ps1
-    ├── Dependencies.ps1
+    ├── Dependencies.ps1       # cienki orkiestrator: Invoke-Dependencies deleguje do DependencyInstall/* przez $ctx
     └── Shortcut.ps1
 ```
+
+Kolejnosc ladowania (`install.ps1` dot-source + `Build-Installer.ps1` konkatenacja): `Core/*` → `Dependencies/*` → `DependencyInstall/*` → `Phases/*`. Dodanie nowego pliku w ktoryms z tych folderow jest autodiscovery (glob `*.ps1`) — bez edycji loaderow. Funkcje `DependencyInstall/*` sa bezstanowe wzgledem siebie: stan instalacji (render, manifest, timeouty) plynie przez jeden obiekt `$ctx` (hashtable) tworzony w `Invoke-Dependencies`.
 
 ### Reguły SOLID i czystego kodu
 

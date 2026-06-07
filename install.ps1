@@ -63,6 +63,8 @@ Get-ChildItem (Join-Path $instDir "Core") -Filter *.ps1 | ForEach-Object { . $_.
 Get-ChildItem (Join-Path $instDir "Dependencies") -Filter "*Dependency.ps1" |
     Where-Object { $_.Name -ne "Dependency.ps1" } | ForEach-Object { . $_.FullName }
 
+Get-ChildItem (Join-Path $instDir "DependencyInstall") -Filter *.ps1 | ForEach-Object { . $_.FullName }
+
 Get-ChildItem (Join-Path $instDir "Phases") -Filter *.ps1 | ForEach-Object { . $_.FullName }
 
 $logDir = $null

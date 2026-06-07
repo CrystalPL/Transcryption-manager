@@ -37,6 +37,9 @@ Get-ChildItem (Join-Path $installDir "Dependencies") -Filter "*Dependency.ps1" |
     Where-Object { $_.Name -ne "Dependency.ps1" } | Sort-Object Name |
     ForEach-Object { $files.Add($_.FullName) }
 
+Get-ChildItem (Join-Path $installDir "DependencyInstall") -Filter *.ps1 | Sort-Object Name |
+    ForEach-Object { $files.Add($_.FullName) }
+
 Get-ChildItem (Join-Path $installDir "Phases") -Filter *.ps1 | Sort-Object Name |
     ForEach-Object { $files.Add($_.FullName) }
 
