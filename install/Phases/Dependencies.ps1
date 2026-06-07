@@ -1,12 +1,10 @@
 ﻿function Write-DepsRow {
     param([hashtable]$Row, [bool]$IsSelected, [int]$Width, [hashtable]$Labels)
     $marker   = if ($IsSelected) { "> " } else { "  " }
-    $name     = $Row.Dep.Name.PadRight(12)
-    $stateStr = if ($Row.Detected) { "wykryto" } elseif ($Row.HasPortable) { "portable" } else { "brak" }
-    $state    = $stateStr.PadRight(10)
-    $mode     = $Labels[$Row.Modes[$Row.Idx]]
-    $modeStr  = "[ <- $($mode.PadRight(16)) -> ]"
-    $line     = "  $marker $name  $state  $modeStr"
+    $name    = $Row.Dep.Name.PadRight(14)
+    $mode    = $Labels[$Row.Modes[$Row.Idx]]
+    $modeStr = "[ <- $($mode.PadRight(16)) -> ]"
+    $line    = "  $marker $name  $modeStr"
     $color    = if ($IsSelected) { 'Cyan' } else { 'White' }
     Write-Host $line.PadRight($Width - 1) -ForegroundColor $color -NoNewline
     Write-Host ""
@@ -37,7 +35,7 @@ function Show-DepsConfig {
     Write-Host "  Konfiguracja zaleznosci:" -ForegroundColor Cyan
     Write-Host "  (strzalki gora/dol: wybierz   lewo/prawo: zmien tryb   Enter: zatwierdz)" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host ("  {0,-14}  {1,-10}  {2}" -f "Komponent", "Status", "Tryb instalacji") -ForegroundColor DarkGray
+    Write-Host ("  {0,-16}  {1}" -f "Komponent", "Tryb instalacji") -ForegroundColor DarkGray
     Write-Host $sep -ForegroundColor DarkGray
 
     $dataRow = [Console]::CursorTop
@@ -588,7 +586,15 @@ function Invoke-Dependencies {
             }
         }
 
-        if (-not (Test-Path $pyExe)) {
+        $venvDir   = Join-Path $RuntimeDir "whisper-env"
+        $installPy = $pyExe
+        if (-not $portablePy -and (Test-Path $pyExe)) {
+            & $pyExe -m venv $venvDir 2>&1 | Out-Null
+            $venvPy = Join-Path $venvDir "Scripts\python.exe"
+            if (Test-Path $venvPy) { $installPy = $venvPy }
+        }
+
+        if (-not (Test-Path $installPy)) {
             $st[$name].Phase = 'err'
         } else {
             $st[$name].Phase     = 'pip'
@@ -610,7 +616,7 @@ function Invoke-Dependencies {
             Add-Content -Path $pipLog -Value "Python: $pyExe" -Encoding UTF8 -ErrorAction SilentlyContinue
 
             $setupOut = "$pipLog.setup"; $setupErr = "$pipLog.setup.err"
-            $setupProc = Start-Process -FilePath $pyExe `
+            $setupProc = Start-Process -FilePath $installPy `
                 -ArgumentList @('-m', 'pip', 'install', '--upgrade', 'setuptools', 'wheel', '--no-warn-script-location') `
                 -RedirectStandardOutput $setupOut -RedirectStandardError $setupErr `
                 -NoNewWindow -PassThru
@@ -631,7 +637,7 @@ function Invoke-Dependencies {
                 $installArgs = @('-m', 'pip', 'install', '--upgrade', '--no-build-isolation', 'openai-whisper', '--no-warn-script-location')
                 Add-Content -Path $pipLog -Value "`n--- whisper pip: $($installArgs -join ' ') ---" -Encoding UTF8 -ErrorAction SilentlyContinue
 
-                $captPy   = $pyExe
+                $captPy   = $installPy
                 $captLog  = $pipLog
                 $captArgs = $installArgs
                 $pipJob = Start-Job -ScriptBlock {
@@ -661,26 +667,6 @@ function Invoke-Dependencies {
                 } -ArgumentList $captPy, $captLog, $captArgs
 
                 while ($pipJob.State -eq 'Running') {
-                    try {
-                        $fs  = [System.IO.File]::Open($pipLog, 'Open', 'Read', 'ReadWrite')
-                        $sr  = New-Object System.IO.StreamReader($fs)
-                        $raw = $sr.ReadToEnd()
-                        $sr.Close(); $fs.Close()
-                        $idx = $raw.LastIndexOf('--- whisper pip')
-                        $pip = if ($idx -ge 0) { $raw.Substring($idx) } else { '' }
-                        $ll  = ($pip -split "`n" | Where-Object {
-                            $l = $_.Trim()
-                            $l -ne '' -and
-                            -not $l.StartsWith('---') -and
-                            -not $l.StartsWith('Successfully uninstalled') -and
-                            -not $l.StartsWith('Uninstalling ') -and
-                            -not $l.StartsWith('Found existing installation') -and
-                            -not $l.StartsWith('DEPRECATION') -and
-                            -not $l.StartsWith('WARNING')
-                        } | Select-Object -Last 1)
-                        if ($ll) { $st[$name].LastLine = $ll.Trim() }
-                    } catch {}
-
                     [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
                     Render-ProgressRow $name $st[$name] $w
                     [Console]::SetCursorPosition(0, $afterRow)
@@ -692,12 +678,8 @@ function Invoke-Dependencies {
                 $rawEc = $jobResult | Where-Object { $_ -is [int] } | Select-Object -Last 1
                 $ec = if ($null -eq $rawEc) { 1 } else { [int]$rawEc }
 
-                $scriptsDir = Join-Path (Split-Path $pyExe -Parent) "Scripts"
+                $scriptsDir = Join-Path (Split-Path $installPy -Parent) "Scripts"
                 $whisperExe = Join-Path $scriptsDir "whisper.exe"
-                if (-not (Test-Path $whisperExe)) {
-                    $wCmd = Get-Command "whisper" -ErrorAction SilentlyContinue
-                    if ($wCmd) { $whisperExe = $wCmd.Source }
-                }
                 Add-Content -Path $pipLog -Value "whisper.exe: $(if ($whisperExe -and (Test-Path $whisperExe)) { 'OK' } else { 'brak' })" -Encoding UTF8 -ErrorAction SilentlyContinue
 
                 $whisperOk  = ($ec -eq 0) -and $whisperExe -and (Test-Path $whisperExe)
@@ -735,19 +717,11 @@ function Invoke-Dependencies {
             Render-ProgressRow $name $st[$name] $w
             [Console]::SetCursorPosition(0, $afterRow)
 
-            $modelProc = Start-Process -FilePath $pyExe -ArgumentList @($modelScript) `
+            $modelProc = Start-Process -FilePath $installPy -ArgumentList @($modelScript) `
                 -RedirectStandardError $modelLogErr -NoNewWindow -PassThru -ErrorAction SilentlyContinue
 
             if ($modelProc) {
                 while (-not $modelProc.HasExited) {
-                    try {
-                        $fs  = [System.IO.File]::Open($modelLogErr, 'Open', 'Read', 'ReadWrite')
-                        $sr  = New-Object System.IO.StreamReader($fs)
-                        $raw = $sr.ReadToEnd()
-                        $sr.Close(); $fs.Close()
-                        $ll  = ($raw -split "`r") | Where-Object { $_.Trim() -ne '' } | Select-Object -Last 1
-                        if ($ll) { $st[$name].LastLine = $ll.Trim() }
-                    } catch {}
                     [Console]::SetCursorPosition(0, $tableRow + $rowOf[$name])
                     Render-ProgressRow $name $st[$name] $w
                     [Console]::SetCursorPosition(0, $afterRow)
@@ -762,12 +736,11 @@ function Invoke-Dependencies {
             Render-ProgressRow $name $st[$name] $w
             [Console]::SetCursorPosition(0, $afterRow)
 
-            if ($portablePy) {
-                $manifest[$dep.Command] = $dep.ManifestEntry('portable', $RuntimeDir, $InstallDir)
-                $needRuntime = $true
-            } else {
-                $manifest[$dep.Command] = $dep.ManifestEntry('system', $RuntimeDir, $InstallDir)
+            $manifest[$dep.Command] = @{
+                mode = 'portable'
+                path = $dep.RelPath($whisperExe, $InstallDir)
             }
+            $needRuntime = $true
         }
     }
 
