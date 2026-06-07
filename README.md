@@ -12,7 +12,7 @@ Aplikacja PowerShell do automatycznego tworzenia transkrypcji nagrań i wpinania
 Otwórz **PowerShell** i wklej:
 
 ```powershell
-irm https://raw.githubusercontent.com/CrystalPL/Transcription-manager/master/install.ps1 | iex
+irm https://github.com/CrystalPL/Transcription-manager/releases/latest/download/installer.ps1 | iex
 ```
 
 Instalator zapyta gdzie zainstalować aplikację (domyślnie `C:\Transkrypcja`), sprawdzi czego brakuje, doinstaluje brakujące programy i doda skrót do menu Start.
@@ -67,7 +67,7 @@ Plik XML możesz wygenerować dowolnym narzędziem AI z transkrypcji `.srt` (np.
 Ponowne uruchomienie instalatora podmieni pliki aplikacji, zachowując Twoje konfiguracje i wyniki:
 
 ```powershell
-irm https://raw.githubusercontent.com/CrystalPL/Transcription-manager/master/install.ps1 | iex
+irm https://github.com/CrystalPL/Transcription-manager/releases/latest/download/installer.ps1 | iex
 ```
 
 ## Odinstalowanie

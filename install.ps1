@@ -4,7 +4,7 @@
 
 .DESCRIPTION
 Tryb najprostszy (pobierze repo z GitHub):
-    irm https://raw.githubusercontent.com/CrystalPL/Transcription-manager/master/install.ps1 | iex
+    irm https://github.com/CrystalPL/Transcription-manager/releases/latest/download/installer.ps1 | iex
 
 Tryb lokalny (gdy plik jest obok src/ i install/):
     .\install.ps1 -SkipDownload
