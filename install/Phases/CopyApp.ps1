@@ -21,7 +21,7 @@
             Write-Host "`n  Instalacja anulowana." -ForegroundColor Red
             throw [OperationCanceledException]::new("Anulowano przez użytkownika")
         }
-        $preserve = @("*.config.json", "Wyniki", "logi")
+        $preserve = @("*.config.json", "Wyniki", "logi", "logs")
         Get-ChildItem $InstallDir -Force | Where-Object {
             $name = $_.Name
             $keep = $false

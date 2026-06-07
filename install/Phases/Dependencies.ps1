@@ -515,6 +515,10 @@ function Invoke-Dependencies {
             Render-ProgressRow $name $st[$name] $w
             [Console]::SetCursorPosition(0, $afterRow)
 
+            if (-not (Test-Path $LogDir)) {
+                New-Item -ItemType Directory -Path $LogDir -Force -ErrorAction SilentlyContinue | Out-Null
+            }
+            if (-not (Test-Path $LogDir)) { $LogDir = $env:TEMP }
             $pipLog    = Join-Path $LogDir "pip-whisper.log"
             $pipLogErr = Join-Path $LogDir "pip-whisper.err"
             $savedHome = $env:PYTHONHOME; $savedPath = $env:PYTHONPATH

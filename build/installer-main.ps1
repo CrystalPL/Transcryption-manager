@@ -1,4 +1,5 @@
-﻿$InstallDir = $env:TM_INSTALL_DIR
+﻿$ErrorActionPreference = 'Stop'
+$InstallDir = $env:TM_INSTALL_DIR
 $NoShortcut = $env:TM_NO_SHORTCUT -eq "1"
 $NoDeps     = $env:TM_NO_DEPS     -eq "1"
 

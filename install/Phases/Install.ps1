@@ -21,11 +21,11 @@
     Write-Host "`n  Folder instalacji: " -NoNewline -ForegroundColor DarkGray
     Write-Host $InstallDir -ForegroundColor Cyan
 
-    $LogDir = Join-Path $InstallDir "logs\$(Get-Date -Format 'yyyyMMdd')"
-    if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
-
     Invoke-SystemCheck
     Invoke-CopyApp      -RepoRoot $RepoRoot -InstallDir $InstallDir
+
+    $LogDir = Join-Path $InstallDir "logs\$(Get-Date -Format 'yyyyMMdd')"
+    try { New-Item -ItemType Directory -Path $LogDir -Force -ErrorAction Stop | Out-Null } catch { $LogDir = $env:TEMP }
     Invoke-Dependencies -NoDeps:$NoDeps -InstallDir $InstallDir -LogDir $LogDir
     Invoke-Shortcut     -InstallDir $InstallDir -NoShortcut:$NoShortcut
 
